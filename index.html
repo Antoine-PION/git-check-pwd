@@ -22,7 +22,23 @@
         </p>
       </header>
 
-      <section class="panel new-analysis" aria-labelledby="scan-heading">
+      <div class="tabs" role="tablist" aria-label="Espaces de l’application">
+        <button id="new-analysis-tab" class="tab-button" type="button" role="tab"
+          aria-controls="new-analysis-panel" aria-selected="true" tabindex="0">
+          Nouvelle analyse
+        </button>
+        <button id="saved-reports-tab" class="tab-button" type="button" role="tab"
+          aria-controls="saved-reports-panel" aria-selected="false" tabindex="-1">
+          Rapports enregistrés
+        </button>
+        <button id="results-tab" class="tab-button" type="button" role="tab"
+          aria-controls="results" aria-selected="false" tabindex="-1" hidden>
+          Rapport
+        </button>
+      </div>
+
+      <section id="new-analysis-panel" class="tab-panel panel new-analysis"
+        role="tabpanel" aria-labelledby="new-analysis-tab" tabindex="0">
         <p class="section-kicker">Scanner un dépôt ou un groupe</p>
         <h2 id="scan-heading">Nouvelle analyse</h2>
         <p class="security-note">
@@ -32,40 +48,48 @@
         </p>
 
         <form id="scan-form">
-          <label for="target-mode">Type de cible</label>
-          <select id="target-mode" name="targetMode">
-            <option value="repository">Un dépôt</option>
-            <option value="group">Un groupe / une organisation</option>
-          </select>
+          <div class="scan-step">
+            <p class="step-label"><span>1</span> Choisissez le type de cible</p>
+            <label for="target-mode">Type de cible</label>
+            <select id="target-mode" name="targetMode" required>
+              <option value="" selected disabled>Choisir un dépôt ou un groupe</option>
+              <option value="repository">Un dépôt</option>
+              <option value="group">Un groupe / une organisation</option>
+            </select>
+          </div>
 
-          <label for="target" id="target-label">URL du dépôt</label>
-          <input
-            id="target"
-            name="target"
-            type="text"
-            placeholder="https://github.com/proprietaire/depot"
-            autocomplete="off"
-            required
-          >
-          <p class="field-help" id="target-help">
-            Collez l’URL HTTPS du dépôt. GitHub, GitLab.com et les instances GitLab auto-hébergées sont pris en charge.
-          </p>
+          <div id="target-step" class="scan-step" hidden>
+            <p class="step-label"><span>2</span> Indiquez la cible</p>
+            <label for="target" id="target-label">URL du dépôt</label>
+            <input
+              id="target"
+              name="target"
+              type="text"
+              placeholder="https://github.com/proprietaire/depot"
+              autocomplete="off"
+            >
+            <p class="field-help" id="target-help">
+              Collez l’URL HTTPS du dépôt. GitHub, GitLab.com et les instances GitLab auto-hébergées sont pris en charge.
+            </p>
+          </div>
 
-          <label for="token" id="token-label">Jeton d’accès personnel GitHub ou GitLab</label>
-          <input
-            id="token"
-            name="token"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            required
-          >
-          <p class="field-help">
-            GitHub : accès en lecture au contenu; pour un groupe, accès en lecture aux dépôts.
-            GitLab : scopes read_api et read_repository; pour un groupe, accès aux projets du groupe.
-          </p>
+          <div id="token-step" class="scan-step" hidden>
+            <p class="step-label"><span>3</span> Authentifiez-vous</p>
+            <label for="token" id="token-label">Jeton d’accès personnel GitHub ou GitLab</label>
+            <input
+              id="token"
+              name="token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <p class="field-help">
+              GitHub : accès en lecture au contenu; pour un groupe, accès en lecture aux dépôts.
+              GitLab : scopes read_api et read_repository; pour un groupe, accès aux projets du groupe.
+            </p>
+          </div>
 
-          <div class="vault-panel">
+          <div id="vault-panel" class="vault-panel" hidden>
             <label class="checkbox-label" for="remember-token">
               <input id="remember-token" type="checkbox">
               Enregistrer le jeton chiffré pour cette instance après l’analyse
@@ -102,7 +126,7 @@
           <section id="project-selection" class="project-selection" aria-labelledby="project-selection-heading" hidden>
             <div class="project-selection-header">
               <div>
-                <h3 id="project-selection-heading">Projets à analyser</h3>
+                <h3 id="project-selection-heading"><span>4</span> Choisissez les projets à analyser</h3>
                 <p id="project-selection-status" class="field-help"></p>
               </div>
               <button type="button" id="toggle-project-selection" class="secondary" disabled>
@@ -113,9 +137,9 @@
           </section>
 
           <div class="actions">
-            <button type="submit" id="list-projects-button">Afficher les projets</button>
-            <button type="button" id="scan-button" disabled>Analyser les projets sélectionnés</button>
-            <button type="button" id="cancel-button" class="secondary" disabled>Annuler</button>
+            <button type="submit" id="list-projects-button" hidden>Afficher les projets</button>
+            <button type="button" id="scan-button" disabled hidden>Analyser les projets sélectionnés</button>
+            <button type="button" id="cancel-button" class="secondary" disabled hidden>Annuler</button>
           </div>
         </form>
 
@@ -128,7 +152,8 @@
         <div id="error-message" class="alert error" role="alert" hidden></div>
       </section>
 
-      <section class="panel saved-reports" aria-labelledby="saved-reports-heading">
+      <section id="saved-reports-panel" class="tab-panel panel saved-reports"
+        role="tabpanel" aria-labelledby="saved-reports-tab" tabindex="0" hidden>
         <p class="section-kicker">Bibliothèque locale</p>
         <h2 id="saved-reports-heading">Rapports enregistrés sur cet appareil</h2>
         <p class="field-help">
@@ -137,7 +162,8 @@
         <div id="saved-reports-list" class="saved-report-list"></div>
       </section>
 
-      <section id="results" class="results" aria-labelledby="results-heading" hidden>
+      <section id="results" class="tab-panel results" role="tabpanel"
+        aria-labelledby="results-tab" tabindex="0" hidden>
         <div class="results-heading">
           <div>
             <p class="eyebrow">Rapport</p>

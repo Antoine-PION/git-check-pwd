@@ -83,13 +83,48 @@ h2 {
   padding: 24px;
 }
 
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-button {
+  min-height: 46px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tab-button:hover {
+  background: #e9eff1;
+  color: #17212b;
+}
+
+.tab-button[aria-selected="true"] {
+  border-color: var(--border);
+  border-bottom-color: var(--accent);
+  background: #fff;
+  color: var(--accent);
+}
+
+.tab-panel {
+  margin-top: 0;
+  border-top-left-radius: 0;
+}
+
 .new-analysis {
   border-top: 5px solid var(--accent);
   background: linear-gradient(145deg, #f3faf7 0, #fff 36%);
 }
 
 .saved-reports {
-  margin-top: 24px;
+  margin-top: 0;
   border-top: 5px solid #536d8c;
   background: linear-gradient(145deg, #f3f6fb 0, #fff 42%);
 }
@@ -127,8 +162,40 @@ form {
   gap: 9px;
 }
 
+.scan-step {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dfe7e5;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 78%);
+}
+
+.step-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.step-label span,
+.project-selection-header h3 span {
+  display: inline-grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dcefe8;
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
 label {
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 0.92rem;
   font-weight: 700;
 }
@@ -189,6 +256,9 @@ select {
 }
 
 .project-selection-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 7px;
   font-size: 1rem;
 }
@@ -313,6 +383,7 @@ a:focus-visible {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
 }
@@ -480,7 +551,7 @@ progress {
 }
 
 .results {
-  margin-top: 36px;
+  margin-top: 0;
   padding: 24px;
   border: 1px solid var(--border);
   border-top: 5px solid #536d8c;
@@ -711,6 +782,18 @@ footer {
 
   .panel {
     padding: 18px;
+  }
+
+  .tabs {
+    gap: 2px;
+    padding: 0 2px;
+  }
+
+  .tab-button {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 8px 6px;
+    font-size: 0.84rem;
   }
 
   .results {

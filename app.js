@@ -17,6 +17,10 @@
   const projectSelectionStatus = document.getElementById("project-selection-status");
   const projectSelectionList = document.getElementById("project-selection-list");
   const toggleProjectSelectionButton = document.getElementById("toggle-project-selection");
+  const targetStep = document.getElementById("target-step");
+  const tokenStep = document.getElementById("token-step");
+  const vaultPanel = document.getElementById("vault-panel");
+  const resultsTab = document.getElementById("results-tab");
   const activity = document.getElementById("activity");
   const activityMessage = document.getElementById("activity-message");
   const progress = document.getElementById("progress");
@@ -43,6 +47,50 @@
   let targetRefreshId = 0;
   let availableRepositories = [];
   let repositorySelectionKey = "";
+  let hasReport = false;
+
+  function activateTab(tabId) {
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    const selectedTab = document.getElementById(tabId);
+    if (!selectedTab || selectedTab.hidden ||
+        (selectedTab.id === resultsTab.id && !hasReport)) {
+      return;
+    }
+
+    for (const tab of tabs) {
+      const selected = tab === selectedTab;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      const panel = document.getElementById(tab.getAttribute("aria-controls"));
+      panel.hidden = !selected;
+    }
+  }
+
+  function updateScanSteps() {
+    const hasMode = Boolean(modeInput.value);
+    targetStep.hidden = !hasMode;
+    targetInput.required = hasMode;
+
+    let validTarget = false;
+    if (hasMode && targetInput.value.trim()) {
+      try {
+        parseTarget(modeInput.value, targetInput.value.trim());
+        validTarget = true;
+      } catch {
+        validTarget = false;
+      }
+    }
+    tokenStep.hidden = !validTarget;
+    tokenInput.required = validTarget;
+    vaultPanel.hidden = !validTarget;
+
+    const busy = Boolean(activeController);
+    const hasToken = Boolean(tokenInput.value.trim());
+    listProjectsButton.hidden = !validTarget || !hasToken || busy;
+    listProjectsButton.disabled = busy;
+    scanButton.hidden = availableRepositories.length === 0;
+    cancelButton.hidden = !busy;
+  }
 
   function setBusy(busy) {
     scanButton.disabled = busy || !tokenInput.value.trim() ||
@@ -61,6 +109,7 @@
     for (const checkbox of projectSelectionList.querySelectorAll("input[type=checkbox]")) {
       checkbox.disabled = busy;
     }
+    updateScanSteps();
   }
 
   function getSelectionKey(target) {
@@ -90,6 +139,7 @@
         : "Tout sélectionner";
     projectSelectionStatus.textContent = selectedCount + " projet(s) sélectionné(s) sur " +
       availableRepositories.length + ".";
+    updateScanSteps();
   }
 
   function clearProjectSelection() {
@@ -98,8 +148,10 @@
     projectSelectionList.replaceChildren();
     projectSelection.hidden = true;
     scanButton.disabled = true;
+    scanButton.hidden = true;
     toggleProjectSelectionButton.disabled = true;
     projectSelectionStatus.textContent = "";
+    updateScanSteps();
   }
 
   function renderProjectSelection(repositories) {
@@ -498,6 +550,7 @@
       tokenInput.value = await decryptToken(record, passphrase);
       vaultPassphraseInput.value = "";
       clearProjectSelection();
+      updateScanSteps();
       setVaultStatus("Jeton déverrouillé pour cette analyse. Il sera effacé du formulaire à la fin.", false);
     } catch (error) {
       setVaultStatus(error.message, true);
@@ -515,6 +568,7 @@
       vaultPassphraseInput.value = "";
       vaultPassphraseConfirmInput.value = "";
       rememberTokenInput.checked = false;
+      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
       setVaultStatus("Jeton enregistré supprimé de cet appareil.", false);
       await refreshVaultControls();
     } catch (error) {
@@ -1614,6 +1668,9 @@
     )) {
       findingsPanel.append(renderProject(repoResult));
     }
+    hasReport = true;
+    resultsTab.hidden = false;
+    activateTab(resultsTab.id);
   }
 
   async function loadRepositories(event) {
@@ -1622,9 +1679,9 @@
     errorMessage.textContent = "";
     clearProjectSelection();
     projectProgressList.replaceChildren();
+    activeController = new AbortController();
     setBusy(true);
     setActivity("Récupération des projets accessibles…", 0, 1);
-    activeController = new AbortController();
 
     try {
       const token = tokenInput.value.trim();
@@ -1660,11 +1717,14 @@
     errorMessage.hidden = true;
     errorMessage.textContent = "";
     results.hidden = true;
+    hasReport = false;
+    resultsTab.hidden = true;
+    activateTab("new-analysis-tab");
     activity.hidden = false;
     progress.value = 0;
     const repositories = getSelectedRepositories();
-    setBusy(true);
     activeController = new AbortController();
+    setBusy(true);
 
     const token = tokenInput.value.trim();
 
@@ -1884,6 +1944,25 @@
   unlockTokenButton.addEventListener("click", unlockSavedToken);
   deleteTokenButton.addEventListener("click", removeSavedToken);
 
+  for (const tab of document.querySelectorAll('[role="tab"]')) {
+    tab.addEventListener("click", () => activateTab(tab.id));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]:not([hidden])'));
+      const index = tabs.indexOf(tab);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+      tabs[nextIndex].focus();
+      activateTab(tabs[nextIndex].id);
+    });
+  }
+
   form.addEventListener("submit", loadRepositories);
   scanButton.addEventListener("click", startScan);
   cancelButton.addEventListener("click", () => {
@@ -1892,5 +1971,8 @@
     }
   });
 
+  updateTargetHelp();
+  updateScanSteps();
+  activateTab("new-analysis-tab");
   refreshSavedReports();
 })();
