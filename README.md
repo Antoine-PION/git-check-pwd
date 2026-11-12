@@ -9,7 +9,7 @@ Servez ce dossier en HTTPS ou en HTTP sur `localhost`, puis ouvrez `index.html`.
 1. Choisissez un dépôt ou un groupe / une organisation.
 2. Collez l’URL HTTPS de la cible (les URL de clone terminant par `.git` sont acceptées). La plateforme est reconnue automatiquement : `github.com` utilise l’API GitHub; `gitlab.com` et les autres hôtes HTTPS utilisent l’API GitLab de l’instance correspondante.
 3. Saisissez un jeton à durée limitée, doté uniquement des autorisations de lecture nécessaires, puis cliquez sur « Afficher les projets ».
-4. Choisissez les dépôts à analyser en cochant ou décochant leur case (ils sont tous cochés par défaut), puis lancez l’analyse des projets sélectionnés. Les résultats restent regroupés par projet.
+4. Choisissez les dépôts à analyser en cochant ou décochant leur case (ils sont tous cochés par défaut); leur URL de clone HTTPS complète est affichée. Puis lancez l’analyse des projets sélectionnés. Les résultats restent regroupés par projet.
 5. Suivez l’avancement de chaque projet : le résumé passe au vert sans détection, au rouge si des secrets sont trouvés avec le nombre et la liste des fichiers impactés, et à l’ambre si l’analyse est incomplète. Ce résumé est conservé dans le rapport local.
 
 Le jeton est conservé uniquement en mémoire pendant l’analyse, transmis directement de votre navigateur à l’hôte de l’API de la plateforme détectée, puis effacé du formulaire. Il n’est envoyé ni au serveur qui héberge cette page ni à un autre service. N’entrez que des URL HTTPS de confiance : pour une instance GitLab auto-hébergée, le jeton est envoyé à l’hôte de cette instance, qui doit autoriser les requêtes CORS provenant de l’application.
@@ -21,6 +21,7 @@ Pour mémoriser un jeton, cochez l’option correspondante et fournissez deux fo
 ## Portée et limites
 
 - L’application parcourt l’historique de chaque branche accessible (commits dédupliqués), récupère les différences de commits et inspecte les lignes ajoutées dans les patchs fournis par l’API. Pour GitLab, si un patch est absent ou vide, elle télécharge la source à la révision du commit pour l’analyser. Les branches supprimées, commits devenus inaccessibles et tags seuls ne sont pas inclus.
+- Pour un groupe GitLab imbriqué dont la résolution directe par chemin renvoie 404, l’application recherche le groupe par son dernier segment puis vérifie que son chemin complet correspond avant de lister ses projets et sous-groupes.
 - Le rapport regroupe les détections par projet, fichier et valeur détectée; les extraits affichés masquent les valeurs sensibles. Il liste les commits concernés et compare chaque secret aux versions actuelles des fichiers sur les branches accessibles. Les rapports conservés localement contiennent uniquement ces données expurgées.
 - Pendant une analyse, un bouton permet d’afficher temporairement la valeur détectée; elle reste masquée par défaut. Les rapports enregistrés ne contiennent pas cette valeur et ne peuvent donc pas la révéler ultérieurement.
 - Dans le rapport, les résultats et les limites sont présentés sous une fiche par projet, y compris pour une analyse de groupe.

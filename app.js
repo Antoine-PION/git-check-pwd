@@ -73,6 +73,11 @@
       .filter(Boolean);
   }
 
+  function getRepositoryCloneUrl(repository) {
+    const encodedPath = repository.fullName.split("/").map(encodeURIComponent).join("/");
+    return repository.provider.origin + "/" + encodedPath + ".git";
+  }
+
   function updateProjectSelectionState() {
     const selectedCount = getSelectedRepositories().length;
     scanButton.disabled = selectedCount === 0 || !tokenInput.value.trim() ||
@@ -112,7 +117,7 @@
       checkbox.checked = true;
       checkbox.addEventListener("change", updateProjectSelectionState);
       const name = document.createElement("span");
-      name.textContent = repository.fullName;
+      name.textContent = getRepositoryCloneUrl(repository);
       label.append(checkbox, name);
       projectSelectionList.append(label);
     }
@@ -781,18 +786,42 @@
         .sort((left, right) => left.fullName.localeCompare(right.fullName));
     }
 
-    const group = await apiGet(
-      target,
-      "/groups/" + encodeURIComponent(target.fullPath),
-      token,
-      signal
-    );
-    if (!group.data || !Number.isInteger(group.data.id)) {
+    let group;
+    try {
+      group = (await apiGet(
+        target,
+        "/groups/" + encodeURIComponent(target.fullPath),
+        token,
+        signal
+      )).data;
+    } catch (error) {
+      if (error.status !== 404) {
+        throw error;
+      }
+
+      const leafPath = target.path[target.path.length - 1];
+      const searchResults = await getAllPages(
+        target,
+        appendQuery("/groups", { search: leafPath }),
+        token,
+        signal
+      );
+      group = searchResults.find((candidate) =>
+        candidate && candidate.full_path === target.fullPath
+      );
+      if (!group) {
+        throw new Error(
+          "Groupe GitLab introuvable ou inaccessible : " + target.fullPath +
+          ". Vérifiez le chemin complet et les droits du jeton."
+        );
+      }
+    }
+    if (!group || !Number.isInteger(group.id)) {
       throw new Error("Réponse inattendue pour le groupe GitLab.");
     }
     const projects = await getAllPages(
       target,
-      "/groups/" + group.data.id + "/projects?include_subgroups=true&with_shared=false",
+      "/groups/" + group.id + "/projects?include_subgroups=true&with_shared=false",
       token,
       signal
     );
