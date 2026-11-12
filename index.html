@@ -37,6 +37,8 @@
         </button>
       </div>
 
+      <div id="storage-status" class="storage-status" role="status" aria-live="polite"></div>
+
       <section id="new-analysis-panel" class="tab-panel panel new-analysis"
         role="tabpanel" aria-labelledby="new-analysis-tab" tabindex="0">
         <p class="section-kicker">Scanner un dépôt ou un groupe</p>
@@ -143,7 +145,6 @@
           </div>
         </form>
 
-        <div id="storage-status" class="storage-status" role="status" aria-live="polite"></div>
         <div id="activity" class="activity" role="status" aria-live="polite" hidden>
           <p id="activity-message"></p>
           <progress id="progress" max="1" value="0" aria-label="Progression de l’analyse"></progress>
@@ -157,8 +158,13 @@
         <p class="section-kicker">Bibliothèque locale</p>
         <h2 id="saved-reports-heading">Rapports enregistrés sur cet appareil</h2>
         <p class="field-help">
-          Les rapports restent dans ce navigateur. Les valeurs des secrets et les jetons ne sont pas inclus.
+          Les rapports locaux restent expurgés. En export JSON/CSV, les valeurs détectées sont chiffrées
+          avec une phrase de passe dédiée; les exports JSON et CSV peuvent être rechargés.
         </p>
+        <div class="report-import-actions">
+          <button type="button" id="import-report-button" class="secondary">Charger un rapport JSON/CSV</button>
+          <input id="import-report-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
+        </div>
         <div id="saved-reports-list" class="saved-report-list"></div>
       </section>
 
@@ -168,6 +174,10 @@
           <div>
             <p class="eyebrow">Rapport</p>
             <h2 id="results-heading">Résultats de l’analyse</h2>
+            <div class="report-export-actions">
+              <button type="button" id="export-report-json">Exporter en JSON</button>
+              <button type="button" id="export-report-csv" class="secondary">Exporter en CSV</button>
+            </div>
           </div>
           <p id="summary" class="summary"></p>
         </div>
@@ -186,6 +196,26 @@
         </section>
         <div id="findings" class="finding-list"></div>
       </section>
+
+      <dialog id="report-passphrase-dialog" aria-labelledby="report-passphrase-title">
+        <form id="report-passphrase-form">
+          <h2 id="report-passphrase-title">Protéger le rapport</h2>
+          <p id="report-passphrase-help" class="field-help"></p>
+          <label for="report-passphrase">Phrase de passe</label>
+          <input id="report-passphrase" type="password" autocomplete="new-password"
+            minlength="12" required>
+          <div id="report-passphrase-confirm-field">
+            <label for="report-passphrase-confirm">Confirmer la phrase de passe</label>
+            <input id="report-passphrase-confirm" type="password" autocomplete="new-password"
+              minlength="12">
+          </div>
+          <p id="report-passphrase-error" class="error-text" role="alert" hidden></p>
+          <div class="report-dialog-actions">
+            <button type="button" id="cancel-report-passphrase" class="secondary">Annuler</button>
+            <button type="submit" id="submit-report-passphrase">Continuer</button>
+          </div>
+        </form>
+      </dialog>
 
       <footer>
         <p>Les valeurs détectées sont masquées dans le rapport. Vérifiez et révoquez tout secret exposé.</p>

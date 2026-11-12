@@ -109,6 +109,17 @@
       /\b[A-Za-z_$][\w$.]*\s*\([^)]*\)\s*[+|&]/.test(value);
   }
 
+  function isTokenEndpointUrl(value) {
+    try {
+      const url = new URL(value);
+      return (url.protocol === "https:" || url.protocol === "http:") &&
+        !url.username && !url.password && !url.search && !url.hash &&
+        /(?:^|\/)(?:access[_-]?token|token)\/?$/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   function detectLine(text) {
     const matches = [];
 
@@ -124,6 +135,7 @@
         if (!secret || placeholderValues.test(secret) || variableReference.test(secret) ||
             (rule.name === "Mot de passe ou secret assigné" &&
               (isSelfAssignment(match, secret) ||
+                isTokenEndpointUrl(secret) ||
                 (Boolean(match[5])
                   ? isLikelyCodeExpression(secret)
                   : isLikelyQuotedCodeExpression(secret))))) {

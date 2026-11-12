@@ -358,6 +358,55 @@ select {
   font-size: 0.84rem;
 }
 
+.report-import-actions,
+.report-export-actions,
+.report-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-import-actions {
+  margin-top: 12px;
+}
+
+.report-export-actions {
+  margin-top: 10px;
+}
+
+.report-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+dialog {
+  width: min(460px, calc(100% - 32px));
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  box-shadow: 0 16px 48px rgb(23 33 43 / 24%);
+}
+
+dialog::backdrop {
+  background: rgb(23 33 43 / 55%);
+}
+
+dialog form > label,
+dialog form > div > label {
+  display: block;
+  margin: 12px 0 6px;
+  font-weight: 650;
+}
+
+dialog input {
+  width: 100%;
+}
+
+dialog .field-help {
+  margin-bottom: 12px;
+}
+
 #saved-reports-list > .field-help {
   margin: 0;
   padding: 14px;

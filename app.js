@@ -42,12 +42,28 @@
   const deleteTokenButton = document.getElementById("delete-token-button");
   const storageStatus = document.getElementById("storage-status");
   const savedReportsList = document.getElementById("saved-reports-list");
+  const importReportButton = document.getElementById("import-report-button");
+  const importReportFile = document.getElementById("import-report-file");
+  const exportReportJsonButton = document.getElementById("export-report-json");
+  const exportReportCsvButton = document.getElementById("export-report-csv");
+  const reportPassphraseDialog = document.getElementById("report-passphrase-dialog");
+  const reportPassphraseForm = document.getElementById("report-passphrase-form");
+  const reportPassphraseTitle = document.getElementById("report-passphrase-title");
+  const reportPassphraseHelp = document.getElementById("report-passphrase-help");
+  const reportPassphraseInput = document.getElementById("report-passphrase");
+  const reportPassphraseConfirmField = document.getElementById("report-passphrase-confirm-field");
+  const reportPassphraseConfirmInput = document.getElementById("report-passphrase-confirm");
+  const reportPassphraseError = document.getElementById("report-passphrase-error");
+  const cancelReportPassphraseButton = document.getElementById("cancel-report-passphrase");
   let activeController = null;
   let databasePromise;
   let targetRefreshId = 0;
   let availableRepositories = [];
   let repositorySelectionKey = "";
   let hasReport = false;
+  let activeReport = null;
+  let activeSecretValues = {};
+  let resolveReportPassphrase;
 
   function activateTab(tabId) {
     const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
@@ -329,6 +345,449 @@
     }
   }
 
+  const reportFileFormat = "git-check-pwd-report";
+  const reportEncryptionAlgorithm = "PBKDF2-SHA-256/AES-256-GCM";
+  const maxReportImportBytes = 20 * 1024 * 1024;
+
+  function reportEncryptionContext(report) {
+    return new TextEncoder().encode(reportFileFormat + ":v1:" + report.id);
+  }
+
+  function getReportSecretValues(report, values) {
+    const secretIds = new Set(report.projects.flatMap((project) =>
+      project.findings.map((finding) => finding.secretId)
+    ));
+    const selected = {};
+    for (const secretId of secretIds) {
+      if (typeof values[secretId] === "string") {
+        selected[secretId] = values[secretId];
+      }
+    }
+    return selected;
+  }
+
+  function redactReportStrings(value, secrets) {
+    if (typeof value === "string") {
+      let redacted = value;
+      for (const secret of secrets) {
+        if (secret) {
+          redacted = redacted.split(secret).join("*****");
+        }
+      }
+      return redacted;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => redactReportStrings(item, secrets));
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) =>
+        [key, redactReportStrings(item, secrets)]
+      ));
+    }
+    return value;
+  }
+
+  async function encryptReportSecrets(report, values, passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveVaultKey(passphrase, salt);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: reportEncryptionContext(report) },
+      key,
+      new TextEncoder().encode(JSON.stringify(values))
+    );
+    return {
+      algorithm: reportEncryptionAlgorithm,
+      iterations: 310000,
+      salt: encodeBase64(salt),
+      iv: encodeBase64(iv),
+      ciphertext: encodeBase64(new Uint8Array(ciphertext))
+    };
+  }
+
+  async function decryptReportSecrets(report, encryptedSecrets, passphrase) {
+    if (!encryptedSecrets || encryptedSecrets.algorithm !== reportEncryptionAlgorithm ||
+        encryptedSecrets.iterations !== 310000 ||
+        typeof encryptedSecrets.salt !== "string" ||
+        typeof encryptedSecrets.iv !== "string" ||
+        typeof encryptedSecrets.ciphertext !== "string") {
+      throw new Error("Le bloc de secrets chiffrés du rapport est invalide.");
+    }
+    try {
+      const key = await deriveVaultKey(passphrase, decodeBase64(encryptedSecrets.salt));
+      const plaintext = await crypto.subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv: decodeBase64(encryptedSecrets.iv),
+          additionalData: reportEncryptionContext(report)
+        },
+        key,
+        decodeBase64(encryptedSecrets.ciphertext)
+      );
+      const values = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+      if (!values || typeof values !== "object" || Array.isArray(values) ||
+          Object.values(values).some((value) => typeof value !== "string")) {
+        throw new Error("Le contenu déchiffré du rapport est invalide.");
+      }
+      const validIds = new Set(report.projects.flatMap((project) =>
+        project.findings.map((finding) => finding.secretId)
+      ));
+      if (Object.keys(values).some((secretId) => !validIds.has(secretId))) {
+        throw new Error("Le rapport contient des valeurs associées à des détections inconnues.");
+      }
+      return values;
+    } catch (error) {
+      if (error.message === "Le contenu déchiffré du rapport est invalide." ||
+          error.message === "Le rapport contient des valeurs associées à des détections inconnues.") {
+        throw error;
+      }
+      throw new Error("Phrase de passe incorrecte ou rapport chiffré illisible.");
+    }
+  }
+
+  function hydrateReportProjects(report, secretValues) {
+    return report.projects.map((project) => ({
+      ...project,
+      branches: project.branches.map((branch) => ({
+        ...branch,
+        secretFiles: branch.secretFiles.slice()
+      })),
+      findings: project.findings.map((finding) => ({
+        ...finding,
+        ...(typeof secretValues[finding.secretId] === "string"
+          ? { secretValue: secretValues[finding.secretId] }
+          : {})
+      }))
+    }));
+  }
+
+  function validatePortableReport(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        value.format !== reportFileFormat || value.version !== 1 ||
+        !value.report || typeof value.report !== "object" || Array.isArray(value.report)) {
+      throw new Error("Ce fichier n’est pas un rapport Git Check Pwd JSON reconnu.");
+    }
+    const report = value.report;
+    if (typeof report.id !== "string" || typeof report.createdAt !== "string" ||
+        Number.isNaN(Date.parse(report.createdAt)) || typeof report.targetLabel !== "string" ||
+        !Array.isArray(report.projects) || !Array.isArray(report.issues) ||
+        report.issues.some((issue) => typeof issue !== "string") ||
+        !Array.isArray(report.projectSummaries)) {
+      throw new Error("La structure du rapport JSON est invalide.");
+    }
+    for (const project of report.projects) {
+      if (!project || typeof project.repository !== "string" ||
+          !Number.isInteger(project.commitCount) || !Number.isInteger(project.filesScanned) ||
+          !Number.isInteger(project.unavailablePatches) ||
+          !Number.isInteger(project.sourceFallbackScanned) ||
+          !Number.isInteger(project.limitedCommits) ||
+          !Array.isArray(project.issues) || project.issues.some((issue) => typeof issue !== "string") ||
+          !Array.isArray(project.branches) || !Array.isArray(project.findings)) {
+        throw new Error("La structure d’un projet du rapport est invalide.");
+      }
+      for (const branch of project.branches) {
+        if (!branch || typeof branch.name !== "string" || !Array.isArray(branch.secretFiles) ||
+            !Number.isInteger(branch.secretCount) ||
+            typeof branch.currentCheckIncomplete !== "boolean") {
+          throw new Error("La structure d’une branche du rapport est invalide.");
+        }
+      }
+      for (const finding of project.findings) {
+        if (!finding || typeof finding.secretId !== "string" ||
+            typeof finding.repository !== "string" || typeof finding.path !== "string" ||
+            typeof finding.rule !== "string" || typeof finding.severity !== "string" ||
+            !Number.isInteger(finding.line) || typeof finding.redactedLine !== "string" ||
+            typeof finding.commit !== "string" || !Array.isArray(finding.currentBranches) ||
+            finding.currentBranches.some((branch) => typeof branch !== "string") ||
+            typeof finding.branchCheckIncomplete !== "boolean" ||
+            Object.prototype.hasOwnProperty.call(finding, "secretValue")) {
+          throw new Error("Une détection est invalide ou contient une valeur en clair.");
+        }
+      }
+    }
+    if (report.projectSummaries.some((summary) =>
+      !summary || typeof summary.repository !== "string" ||
+      !["error", "findings", "incomplete", "clean"].includes(summary.status) ||
+      !Array.isArray(summary.files) || summary.files.some((path) => typeof path !== "string")
+    )) {
+      throw new Error("Le résumé par projet du rapport est invalide.");
+    }
+
+    const safeReport = {
+      id: report.id,
+      createdAt: report.createdAt,
+      targetLabel: report.targetLabel,
+      projects: report.projects.map((project) => ({
+        repository: project.repository,
+        commitCount: project.commitCount,
+        filesScanned: project.filesScanned,
+        unavailablePatches: project.unavailablePatches,
+        sourceFallbackScanned: project.sourceFallbackScanned,
+        limitedCommits: project.limitedCommits,
+        issues: project.issues.slice(),
+        branches: project.branches.map((branch) => ({
+          name: branch.name,
+          lastCommitDate: branch.lastCommitDate,
+          ageDays: branch.ageDays,
+          stale: branch.stale,
+          isDefault: branch.isDefault,
+          protected: branch.protected,
+          secretFiles: branch.secretFiles.slice(),
+          secretCount: branch.secretCount,
+          currentCheckIncomplete: branch.currentCheckIncomplete
+        })),
+        findings: project.findings.map((finding) => ({
+          secretId: finding.secretId,
+          repository: finding.repository,
+          path: finding.path,
+          rule: finding.rule,
+          severity: finding.severity,
+          line: finding.line,
+          redactedLine: finding.redactedLine,
+          commit: finding.commit,
+          provider: finding.provider,
+          origin: finding.origin,
+          currentBranches: finding.currentBranches.slice(),
+          branchCheckIncomplete: finding.branchCheckIncomplete
+        }))
+      })),
+      projectSummaries: report.projectSummaries.map((summary) => ({
+        repository: summary.repository,
+        status: summary.status,
+        files: summary.files.slice(),
+        issue: typeof summary.issue === "string" ? summary.issue : ""
+      })),
+      issues: report.issues.slice()
+    };
+    return {
+      format: reportFileFormat,
+      version: 1,
+      report: safeReport,
+      encryptedSecrets: value.encryptedSecrets
+    };
+  }
+
+  function parseCsvRows(text) {
+    const rows = [];
+    let row = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+      if (quoted) {
+        if (character === "\"" && text[index + 1] === "\"") {
+          cell += "\"";
+          index += 1;
+        } else if (character === "\"") {
+          quoted = false;
+        } else {
+          cell += character;
+        }
+      } else if (character === "\"" && cell.length === 0) {
+        quoted = true;
+      } else if (character === ",") {
+        row.push(cell);
+        cell = "";
+      } else if (character === "\n" || character === "\r") {
+        row.push(cell);
+        cell = "";
+        if (row.some((value) => value !== "")) {
+          rows.push(row);
+        }
+        row = [];
+        if (character === "\r" && text[index + 1] === "\n") {
+          index += 1;
+        }
+      } else {
+        cell += character;
+      }
+    }
+    if (quoted) {
+      throw new Error("Le fichier CSV contient un champ entre guillemets incomplet.");
+    }
+    row.push(cell);
+    if (row.some((value) => value !== "")) {
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function csvJsonValue(row, name, fallback) {
+    const value = row[name];
+    if (!value) {
+      return fallback;
+    }
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new Error("Le champ CSV " + name + " ne contient pas un JSON valide.");
+    }
+  }
+
+  function parsePortableCsv(text) {
+    const rows = parseCsvRows(text.replace(/^\uFEFF/, ""));
+    if (rows.length < 2) {
+      throw new Error("Le fichier CSV ne contient pas de rapport.");
+    }
+    const headers = rows[0];
+    const requiredHeaders = [
+      "report_id", "report_created_at", "target", "global_issues", "repository",
+      "project_scanned", "project_status", "project_files", "commits_scanned",
+      "files_scanned", "unavailable_patches", "source_fallback_scanned",
+      "limited_commits", "branches_json", "project_issues", "project_summary_issue",
+      "path", "secret_id", "rule", "severity", "line", "redacted_line", "commit",
+      "provider", "origin", "current_branches", "branch_check_incomplete",
+      "encrypted_secret_value"
+    ];
+    if (requiredHeaders.some((header) => !headers.includes(header))) {
+      throw new Error("Ce CSV ne contient pas les colonnes d’un export Git Check Pwd.");
+    }
+    const records = rows.slice(1).map((cells) => {
+      if (cells.length > headers.length) {
+        throw new Error("Une ligne CSV contient trop de colonnes.");
+      }
+      const padded = cells.concat(Array(headers.length - cells.length).fill(""));
+      return Object.fromEntries(headers.map((header, index) => [header, padded[index]]));
+    });
+    const first = records[0];
+    if (!first.report_id || !first.report_created_at || !first.target) {
+      throw new Error("Les métadonnées du rapport CSV sont incomplètes.");
+    }
+    const globalIssues = csvJsonValue(first, "global_issues", []);
+    if (!Array.isArray(globalIssues) || globalIssues.some((issue) => typeof issue !== "string")) {
+      throw new Error("La liste des erreurs globales du CSV est invalide.");
+    }
+
+    const projectsByName = new Map();
+    const summariesByName = new Map();
+    const encryptedValues = new Map();
+    for (const row of records) {
+      if (row.report_id !== first.report_id ||
+          row.report_created_at !== first.report_created_at ||
+          row.target !== first.target ||
+          JSON.stringify(csvJsonValue(row, "global_issues", [])) !== JSON.stringify(globalIssues)) {
+        throw new Error("Le CSV contient des lignes provenant de rapports différents.");
+      }
+      const summaryFiles = csvJsonValue(row, "project_files", []);
+      if (row.repository && !summariesByName.has(row.repository)) {
+        summariesByName.set(row.repository, {
+          repository: row.repository,
+          status: row.project_status,
+          files: summaryFiles,
+          issue: row.project_summary_issue || ""
+        });
+      }
+      if (row.project_scanned === "true" && row.repository) {
+        let project = projectsByName.get(row.repository);
+        if (!project) {
+          const counts = [
+            "commits_scanned", "files_scanned", "unavailable_patches",
+            "source_fallback_scanned", "limited_commits"
+          ].map((name) => Number(row[name]));
+          if (counts.some((count) => !Number.isSafeInteger(count) || count < 0)) {
+            throw new Error("Un compteur de projet dans le CSV est invalide.");
+          }
+          project = {
+            repository: row.repository,
+            commitCount: counts[0],
+            filesScanned: counts[1],
+            unavailablePatches: counts[2],
+            sourceFallbackScanned: counts[3],
+            limitedCommits: counts[4],
+            issues: csvJsonValue(row, "project_issues", []),
+            branches: csvJsonValue(row, "branches_json", []),
+            findings: []
+          };
+          projectsByName.set(row.repository, project);
+        }
+        if (row.secret_id) {
+          const line = Number(row.line);
+          const currentBranches = csvJsonValue(row, "current_branches", []);
+          if (!Number.isSafeInteger(line) || line < 1 ||
+              !Array.isArray(currentBranches) ||
+              !["true", "false"].includes(row.branch_check_incomplete)) {
+            throw new Error("Une détection dans le CSV est invalide.");
+          }
+          project.findings.push({
+            secretId: row.secret_id,
+            repository: row.repository,
+            path: row.path,
+            rule: row.rule,
+            severity: row.severity,
+            line,
+            redactedLine: row.redacted_line,
+            commit: row.commit,
+            provider: row.provider,
+            origin: row.origin,
+            currentBranches,
+            branchCheckIncomplete: row.branch_check_incomplete === "true"
+          });
+          if (row.encrypted_secret_value) {
+            if (encryptedValues.has(row.secret_id) &&
+                encryptedValues.get(row.secret_id) !== row.encrypted_secret_value) {
+              throw new Error("Le CSV contient des valeurs chiffrées contradictoires.");
+            }
+            encryptedValues.set(row.secret_id, row.encrypted_secret_value);
+          }
+        }
+      }
+    }
+    const report = {
+      id: first.report_id,
+      createdAt: first.report_created_at,
+      targetLabel: first.target,
+      projects: Array.from(projectsByName.values()),
+      projectSummaries: Array.from(summariesByName.values()),
+      issues: globalIssues
+    };
+    return { report, encryptedValues };
+  }
+
+  async function decryptCsvSecretValues(report, encryptedValues, passphrase) {
+    if (encryptedValues.size === 0) {
+      return {};
+    }
+    const entries = Array.from(encryptedValues, ([secretId, serialized]) => {
+      let encrypted;
+      try {
+        encrypted = JSON.parse(serialized);
+      } catch {
+        throw new Error("Une valeur chiffrée du CSV est invalide.");
+      }
+      if (encrypted.algorithm !== reportEncryptionAlgorithm ||
+          encrypted.iterations !== 310000 || typeof encrypted.salt !== "string" ||
+          typeof encrypted.iv !== "string" || typeof encrypted.ciphertext !== "string") {
+        throw new Error("Une valeur chiffrée du CSV est invalide.");
+      }
+      return { secretId, encrypted };
+    });
+    const salt = entries[0].encrypted.salt;
+    if (entries.some((entry) => entry.encrypted.salt !== salt)) {
+      throw new Error("Les valeurs chiffrées du CSV ne partagent pas le même chiffrement.");
+    }
+    const key = await deriveVaultKey(passphrase, decodeBase64(salt));
+    const values = {};
+    try {
+      for (const { secretId, encrypted } of entries) {
+        const plaintext = await crypto.subtle.decrypt(
+          {
+            name: "AES-GCM",
+            iv: decodeBase64(encrypted.iv),
+            additionalData: new TextEncoder().encode(
+              reportFileFormat + ":csv:v1:" + report.id + ":" + secretId
+            )
+          },
+          key,
+          decodeBase64(encrypted.ciphertext)
+        );
+        values[secretId] = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
+      }
+    } catch {
+      throw new Error("Phrase de passe incorrecte ou rapport CSV chiffré illisible.");
+    }
+    return values;
+  }
+
   function reportId() {
     return randomId();
   }
@@ -360,6 +819,7 @@
 
   function createSafeReport(repoResults, scanIssues, targetLabel, repositories) {
     const now = new Date();
+    const secretValues = {};
     const projects = repoResults.map((result) => {
       const secretIds = new Map();
       const findings = result.findings.map((finding) => {
@@ -367,6 +827,7 @@
         if (!secretIds.has(key)) {
           secretIds.set(key, randomId());
         }
+        secretValues[secretIds.get(key)] = finding.secretValue;
         return {
           secretId: secretIds.get(key),
           repository: finding.repository,
@@ -406,17 +867,280 @@
     });
 
     return {
-      id: reportId(),
-      createdAt: now.toISOString(),
-      targetLabel,
-      projects,
-      projectSummaries: getProjectSummaries(repositories, repoResults, scanIssues),
-      issues: Array.from(new Set(scanIssues))
+      report: {
+        id: reportId(),
+        createdAt: now.toISOString(),
+        targetLabel,
+        projects,
+        projectSummaries: getProjectSummaries(repositories, repoResults, scanIssues),
+        issues: Array.from(new Set(scanIssues))
+      },
+      secretValues
     };
   }
 
   function formatReportDate(value) {
     return new Date(value).toLocaleString("fr-FR");
+  }
+
+  function requestReportPassphrase(mode) {
+    if (resolveReportPassphrase) {
+      throw new Error("Une demande de phrase de passe est déjà ouverte.");
+    }
+    const isExport = mode === "export";
+    reportPassphraseTitle.textContent = isExport
+      ? "Chiffrer les valeurs des secrets"
+      : "Déchiffrer les valeurs des secrets";
+    reportPassphraseHelp.textContent = isExport
+      ? "Choisissez une phrase de passe d’au moins 12 caractères et conservez-la séparément du fichier. Elle sera nécessaire pour charger les valeurs chiffrées."
+      : "Saisissez la phrase de passe utilisée lors de l’export. Une phrase incorrecte ou un fichier modifié empêchera le déchiffrement.";
+    reportPassphraseConfirmField.hidden = !isExport;
+    reportPassphraseConfirmInput.required = isExport;
+    reportPassphraseInput.autocomplete = isExport ? "new-password" : "current-password";
+    reportPassphraseError.hidden = true;
+    reportPassphraseError.textContent = "";
+    reportPassphraseForm.reset();
+    reportPassphraseDialog.showModal();
+    reportPassphraseInput.focus();
+    return new Promise((resolve) => {
+      resolveReportPassphrase = resolve;
+    });
+  }
+
+  function downloadReportFile(report, extension, content, mimeType) {
+    const baseName = (report.targetLabel || "rapport")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "rapport";
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = baseName + "-" + report.createdAt.slice(0, 10) + "." + extension;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function csvCell(value) {
+    let text = value === null || value === undefined ? "" : String(value);
+    if (/^[=+\-@\t\r]/.test(text)) {
+      text = "'" + text;
+    }
+    return "\"" + text.replace(/"/g, "\"\"") + "\"";
+  }
+
+  async function encryptCsvSecrets(report, values, passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const key = await deriveVaultKey(passphrase, salt);
+    const encrypted = {};
+    for (const [secretId, value] of Object.entries(values)) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const aad = new TextEncoder().encode(
+        reportFileFormat + ":csv:v1:" + report.id + ":" + secretId
+      );
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, additionalData: aad },
+        key,
+        new TextEncoder().encode(value)
+      );
+      encrypted[secretId] = JSON.stringify({
+        algorithm: reportEncryptionAlgorithm,
+        iterations: 310000,
+        salt: encodeBase64(salt),
+        iv: encodeBase64(iv),
+        ciphertext: encodeBase64(new Uint8Array(ciphertext))
+      });
+    }
+    return encrypted;
+  }
+
+  async function exportReport(report, availableSecretValues, format) {
+    const secretValues = getReportSecretValues(report, availableSecretValues);
+    const exportableReport = redactReportStrings(report, Object.values(secretValues));
+    let passphrase = null;
+    if (Object.keys(secretValues).length > 0) {
+      passphrase = await requestReportPassphrase("export");
+      if (!passphrase) {
+        return;
+      }
+    }
+
+    if (format === "json") {
+      const exported = {
+        format: reportFileFormat,
+        version: 1,
+        report: exportableReport,
+        encryptedSecrets: passphrase
+          ? await encryptReportSecrets(exportableReport, secretValues, passphrase)
+          : null
+      };
+      downloadReportFile(
+        exportableReport,
+        "json",
+        JSON.stringify(exported, null, 2),
+        "application/json;charset=utf-8"
+      );
+      setStorageStatus(
+        passphrase
+          ? "Rapport JSON exporté; les valeurs des secrets sont chiffrées."
+          : "Rapport JSON expurgé exporté; aucune valeur de secret n’était disponible.",
+        false
+      );
+      return;
+    }
+
+    const encryptedById = passphrase
+      ? await encryptCsvSecrets(exportableReport, secretValues, passphrase)
+      : {};
+    const headers = [
+      "report_id", "report_created_at", "target", "global_issues", "repository",
+      "project_scanned", "project_status", "project_files", "commits_scanned", "files_scanned",
+      "unavailable_patches", "source_fallback_scanned", "limited_commits",
+      "branches_json", "project_issues", "project_summary_issue", "path",
+      "secret_id", "rule", "severity", "line", "redacted_line", "commit",
+      "provider", "origin", "current_branches",
+      "branch_check_incomplete", "encrypted_secret_value"
+    ];
+    const summaryByRepository = new Map(
+      exportableReport.projectSummaries.map((summary) => [summary.repository, summary])
+    );
+    const rows = [headers];
+    for (const project of exportableReport.projects) {
+      const summary = summaryByRepository.get(project.repository);
+      const findings = project.findings.length > 0 ? project.findings : [null];
+      for (const finding of findings) {
+        rows.push([
+          exportableReport.id, exportableReport.createdAt, exportableReport.targetLabel,
+          JSON.stringify(exportableReport.issues),
+          project.repository, true, summary ? summary.status : "",
+          JSON.stringify(summary ? summary.files : []), project.commitCount,
+          project.filesScanned, project.unavailablePatches, project.sourceFallbackScanned,
+          project.limitedCommits, JSON.stringify(project.branches),
+          JSON.stringify(project.issues), summary ? summary.issue : "",
+          finding ? finding.path : "", finding ? finding.secretId : "",
+          finding ? finding.rule : "", finding ? finding.severity : "",
+          finding ? finding.line : "", finding ? finding.redactedLine : "",
+          finding ? finding.commit : "", finding ? finding.provider : "",
+          finding ? finding.origin : "",
+          finding ? JSON.stringify(finding.currentBranches) : "",
+          finding ? finding.branchCheckIncomplete : "",
+          finding ? (encryptedById[finding.secretId] || "") : ""
+        ]);
+      }
+    }
+    const projectNames = new Set(exportableReport.projects.map((project) => project.repository));
+    for (const summary of exportableReport.projectSummaries) {
+      if (projectNames.has(summary.repository)) {
+        continue;
+      }
+      rows.push([
+        exportableReport.id, exportableReport.createdAt, exportableReport.targetLabel,
+        JSON.stringify(exportableReport.issues),
+        summary.repository, false, summary.status, JSON.stringify(summary.files),
+        0, 0, 0, 0, 0, "[]", "[]", summary.issue
+      ]);
+    }
+    if (rows.length === 1) {
+      rows.push([
+        exportableReport.id, exportableReport.createdAt, exportableReport.targetLabel,
+        JSON.stringify(exportableReport.issues),
+        "", false, "", "[]", 0, 0, 0, 0, 0, "[]", "[]", ""
+      ]);
+    }
+    downloadReportFile(
+      exportableReport,
+      "csv",
+      "\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n"),
+      "text/csv;charset=utf-8"
+    );
+    setStorageStatus(
+      passphrase
+        ? "Rapport CSV exporté; chaque valeur de secret est chiffrée."
+        : "Rapport CSV expurgé exporté; aucune valeur de secret n’était disponible.",
+      false
+    );
+  }
+
+  function showReport(report, secretValues) {
+    activeReport = report;
+    activeSecretValues = secretValues || {};
+    renderReport(
+      hydrateReportProjects(report, activeSecretValues),
+      report.issues,
+      report,
+      report.projectSummaries
+    );
+  }
+
+  async function importPortableReport(file) {
+    try {
+      if (!file) {
+        return;
+      }
+      if (file.size > maxReportImportBytes) {
+        throw new Error("Le fichier de rapport dépasse la limite de 20 Mio.");
+      }
+      const source = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+      const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv";
+      const csvEncryptedValues = isCsv ? parsePortableCsv(source) : null;
+      const portable = isCsv
+        ? validatePortableReport({
+          format: reportFileFormat,
+          version: 1,
+          report: csvEncryptedValues.report,
+          encryptedSecrets: null
+        })
+        : validatePortableReport(JSON.parse(source));
+      let secretValues = {};
+      if (portable.encryptedSecrets ||
+          (csvEncryptedValues && csvEncryptedValues.encryptedValues.size > 0)) {
+        const passphrase = await requestReportPassphrase("import");
+        if (!passphrase) {
+          setStorageStatus("Chargement du rapport annulé.", false);
+          return;
+        }
+        secretValues = isCsv
+          ? await decryptCsvSecretValues(
+            portable.report,
+            csvEncryptedValues.encryptedValues,
+            passphrase
+          )
+          : await decryptReportSecrets(
+            portable.report,
+            portable.encryptedSecrets,
+            passphrase
+          );
+      }
+
+      const report = redactReportStrings(portable.report, Object.values(secretValues));
+      report.id = reportId();
+      showReport(report, secretValues);
+      activateTab(resultsTab.id);
+
+      let saved = false;
+      try {
+        await putStored("reports", report);
+        saved = true;
+        await refreshSavedReports();
+      } catch (error) {
+        setStorageStatus(
+          "Rapport chargé, mais l’enregistrement local a échoué : " + error.message,
+          true
+        );
+      }
+      if (saved) {
+        setStorageStatus(
+          "Rapport chargé et ajouté à la bibliothèque locale sous forme expurgée.",
+          false
+        );
+      }
+    } catch (error) {
+      setStorageStatus("Impossible de charger le rapport : " + error.message, true);
+    } finally {
+      importReportFile.value = "";
+    }
   }
 
   function setStorageStatus(message, isError) {
@@ -511,9 +1235,29 @@
         const openButton = appendText(actions, "button", "Ouvrir");
         openButton.type = "button";
         openButton.addEventListener("click", () => {
-          renderReport(report.projects, report.issues, report, report.projectSummaries);
+          showReport(report, {});
+          activateTab(resultsTab.id);
           results.scrollIntoView({ behavior: "smooth", block: "start" });
         });
+        for (const [format, label] of [["json", "JSON"], ["csv", "CSV"]]) {
+          const exportButton = appendText(
+            actions,
+            "button",
+            "Exporter " + label,
+            "secondary"
+          );
+          exportButton.type = "button";
+          exportButton.addEventListener("click", async () => {
+            exportButton.disabled = true;
+            try {
+              await exportReport(report, {}, format);
+            } catch (error) {
+              setStorageStatus("Export impossible : " + error.message, true);
+            } finally {
+              exportButton.disabled = false;
+            }
+          });
+        }
         const deleteButton = appendText(actions, "button", "Supprimer", "secondary");
         deleteButton.type = "button";
         deleteButton.addEventListener("click", async () => {
@@ -1763,6 +2507,8 @@
     errorMessage.textContent = "";
     results.hidden = true;
     hasReport = false;
+    activeReport = null;
+    activeSecretValues = {};
     resultsTab.hidden = true;
     activateTab("new-analysis-tab");
     activity.hidden = false;
@@ -1887,14 +2633,13 @@
       if (repoResults.length === 0) {
         throw new Error("Aucun dépôt n’a pu être analysé. " + scanIssues.join(" "));
       }
-      const projectSummaries = getProjectSummaries(repositories, repoResults, scanIssues);
-      const report = createSafeReport(
+      const { report, secretValues } = createSafeReport(
         repoResults,
         scanIssues,
         targetInput.value.trim(),
         repositories
       );
-      renderReport(repoResults, scanIssues, undefined, projectSummaries);
+      showReport(report, secretValues);
       let reportSaved = false;
       try {
         await putStored("reports", report);
@@ -1988,6 +2733,66 @@
   toggleProjectSelectionButton.addEventListener("click", toggleProjectSelection);
   unlockTokenButton.addEventListener("click", unlockSavedToken);
   deleteTokenButton.addEventListener("click", removeSavedToken);
+  importReportButton.addEventListener("click", () => importReportFile.click());
+  importReportFile.addEventListener("change", () =>
+    importPortableReport(importReportFile.files && importReportFile.files[0])
+  );
+  reportPassphraseForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const passphrase = reportPassphraseInput.value;
+    if (passphrase.length < 12) {
+      reportPassphraseError.textContent = "La phrase de passe doit contenir au moins 12 caractères.";
+      reportPassphraseError.hidden = false;
+      return;
+    }
+    if (!reportPassphraseConfirmField.hidden &&
+        reportPassphraseConfirmInput.value !== passphrase) {
+      reportPassphraseError.textContent = "Les deux saisies de la phrase de passe ne correspondent pas.";
+      reportPassphraseError.hidden = false;
+      return;
+    }
+    reportPassphraseDialog.close("submit");
+  });
+  cancelReportPassphraseButton.addEventListener("click", () =>
+    reportPassphraseDialog.close("cancel")
+  );
+  reportPassphraseDialog.addEventListener("close", () => {
+    const passphrase = reportPassphraseDialog.returnValue === "submit"
+      ? reportPassphraseInput.value
+      : null;
+    const resolve = resolveReportPassphrase;
+    resolveReportPassphrase = null;
+    reportPassphraseForm.reset();
+    if (resolve) {
+      resolve(passphrase);
+    }
+  });
+  exportReportJsonButton.addEventListener("click", async () => {
+    if (!activeReport) {
+      return;
+    }
+    exportReportJsonButton.disabled = true;
+    try {
+      await exportReport(activeReport, activeSecretValues, "json");
+    } catch (error) {
+      setStorageStatus("Export JSON impossible : " + error.message, true);
+    } finally {
+      exportReportJsonButton.disabled = false;
+    }
+  });
+  exportReportCsvButton.addEventListener("click", async () => {
+    if (!activeReport) {
+      return;
+    }
+    exportReportCsvButton.disabled = true;
+    try {
+      await exportReport(activeReport, activeSecretValues, "csv");
+    } catch (error) {
+      setStorageStatus("Export CSV impossible : " + error.message, true);
+    } finally {
+      exportReportCsvButton.disabled = false;
+    }
+  });
 
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.addEventListener("click", () => activateTab(tab.id));
