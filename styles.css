@@ -530,6 +530,21 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.project-summary-item a {
+  color: #155d89;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.project-summary-item a:hover {
+  color: #0c3f60;
+}
+
+.file-result:focus {
+  outline: 3px solid #8cc9b8;
+  outline-offset: 4px;
+}
+
 progress {
   width: 100%;
   height: 10px;

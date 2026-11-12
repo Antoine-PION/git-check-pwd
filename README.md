@@ -12,7 +12,7 @@ Servez ce dossier en HTTPS ou en HTTP sur `localhost`, puis ouvrez `index.html`.
 4. Choisissez les dépôts à analyser en cochant ou décochant leur case (ils sont tous cochés par défaut); leur URL de clone HTTPS complète est affichée. Puis lancez l’analyse des projets sélectionnés. Les résultats restent regroupés par projet.
 5. Suivez l’avancement de chaque projet : le résumé passe au vert sans détection, au rouge si des secrets sont trouvés avec le nombre et la liste des fichiers impactés, et à l’ambre si l’analyse est incomplète. Ce résumé est conservé dans le rapport local.
 
-La navigation par onglets sépare la nouvelle analyse, la bibliothèque de rapports enregistrés et le rapport sélectionné. Les champs du formulaire apparaissent progressivement après le choix du type de cible puis la saisie d’une URL valide.
+La navigation par onglets sépare la nouvelle analyse, la bibliothèque de rapports enregistrés et le rapport sélectionné. Les champs du formulaire apparaissent progressivement après le choix du type de cible puis la saisie d’une URL valide. Dans le résumé final, chaque fichier impacté est un lien vers son détail dans le rapport.
 
 Le jeton est conservé uniquement en mémoire pendant l’analyse, transmis directement de votre navigateur à l’hôte de l’API de la plateforme détectée, puis effacé du formulaire. Il n’est envoyé ni au serveur qui héberge cette page ni à un autre service. N’entrez que des URL HTTPS de confiance : pour une instance GitLab auto-hébergée, le jeton est envoyé à l’hôte de cette instance, qui doit autoriser les requêtes CORS provenant de l’application.
 

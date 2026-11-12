@@ -1537,7 +1537,7 @@
     return files;
   }
 
-  function renderProject(repoResult) {
+  function renderProject(repoResult, fileAnchorIds) {
     const project = document.createElement("article");
     project.className = "project-result";
     appendText(project, "h3", repoResult.repository);
@@ -1549,6 +1549,11 @@
     for (const path of paths) {
       const file = document.createElement("section");
       file.className = "file-result";
+      const fileAnchorId = fileAnchorIds.get(JSON.stringify([repoResult.repository, path]));
+      if (fileAnchorId) {
+        file.id = fileAnchorId;
+        file.tabIndex = -1;
+      }
       appendText(file, "h4", path);
       const secrets = Array.from(files.get(path).values())
         .sort((left, right) => left.rule.localeCompare(right.rule));
@@ -1562,7 +1567,7 @@
     return project;
   }
 
-  function renderProjectSummary(summary) {
+  function renderProjectSummary(summary, fileAnchorIds) {
     const item = document.createElement("article");
     item.className = "project-summary-item status-" + summary.status;
     const heading = document.createElement("div");
@@ -1591,7 +1596,24 @@
       appendText(item, "p", files.length + " fichier(s) impacté(s) :", "project-file-count");
       const list = document.createElement("ul");
       for (const path of files) {
-        appendText(list, "li", path);
+        const entry = document.createElement("li");
+        const fileAnchorId = fileAnchorIds &&
+          fileAnchorIds.get(JSON.stringify([summary.repository, path]));
+        if (fileAnchorId) {
+          const link = appendText(entry, "a", path);
+          link.href = "#" + fileAnchorId;
+          link.setAttribute("aria-label", "Voir le détail du fichier " + path);
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            activateTab(resultsTab.id);
+            const fileDetail = document.getElementById(fileAnchorId);
+            fileDetail.scrollIntoView({ behavior: "smooth", block: "start" });
+            fileDetail.focus({ preventScroll: true });
+          });
+        } else {
+          entry.textContent = path;
+        }
+        list.append(entry);
       }
       item.append(list);
     } else if (summary.issue) {
@@ -1626,6 +1648,17 @@
       repoResults,
       scanIssues
     );
+    const fileAnchorIds = new Map();
+    let fileAnchorIndex = 0;
+    for (const projectSummary of summaries) {
+      for (const path of projectSummary.files || []) {
+        fileAnchorIds.set(
+          JSON.stringify([projectSummary.repository, path]),
+          "file-detail-" + fileAnchorIndex
+        );
+        fileAnchorIndex += 1;
+      }
+    }
     results.hidden = false;
     document.getElementById("results-heading").textContent = savedReport
       ? "Rapport du " + formatReportDate(savedReport.createdAt)
@@ -1635,7 +1668,7 @@
       summaries.length + " projet(s)";
     projectSummaryList.replaceChildren();
     for (const projectSummary of summaries) {
-      projectSummaryList.append(renderProjectSummary(projectSummary));
+      projectSummaryList.append(renderProjectSummary(projectSummary, fileAnchorIds));
     }
     findingsPanel.replaceChildren();
 
@@ -1666,7 +1699,7 @@
     for (const repoResult of repoResults.slice().sort((left, right) =>
       left.repository.localeCompare(right.repository)
     )) {
-      findingsPanel.append(renderProject(repoResult));
+      findingsPanel.append(renderProject(repoResult, fileAnchorIds));
     }
     hasReport = true;
     resultsTab.hidden = false;
