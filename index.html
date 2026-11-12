@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src https://api.github.com; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; connect-src https://api.github.com https:; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
     >
     <title>Git Check Pwd — Détection de secrets</title>
     <link rel="stylesheet" href="styles.css">
@@ -18,37 +18,39 @@
         <p class="eyebrow">Git Check Pwd</p>
         <h1>Repérez les secrets dans l’historique Git</h1>
         <p class="intro">
-          Analysez les ajouts de commits d’un dépôt ou des dépôts accessibles d’une organisation GitHub.
+          GitHub ou GitLab sont reconnus à partir de l’URL saisie. Analysez un dépôt ou un groupe accessible.
         </p>
       </header>
 
       <section class="panel" aria-labelledby="scan-heading">
         <h2 id="scan-heading">Nouvelle analyse</h2>
         <p class="security-note">
-          Votre jeton est utilisé uniquement dans ce navigateur et transmis directement à GitHub.
-          Il n’est envoyé ni au serveur qui héberge cette page ni à un autre service. Préférez un jeton
-          à durée limitée avec les droits de lecture minimaux.
+          Votre jeton est utilisé uniquement dans ce navigateur et transmis directement à la plateforme
+          et à l’hôte indiqués par l’URL. Utilisez uniquement une URL de confiance et un jeton à durée
+          limitée doté des droits de lecture minimaux.
         </p>
 
         <form id="scan-form">
-          <label for="target-mode">Périmètre</label>
+          <label for="target-mode">Type de cible</label>
           <select id="target-mode" name="targetMode">
             <option value="repository">Un dépôt</option>
-            <option value="organization">Une organisation</option>
+            <option value="group">Un groupe / une organisation</option>
           </select>
 
-          <label for="target" id="target-label">Dépôt GitHub</label>
+          <label for="target" id="target-label">URL du dépôt</label>
           <input
             id="target"
             name="target"
             type="text"
-            placeholder="proprietaire/depot"
+            placeholder="https://github.com/proprietaire/depot"
             autocomplete="off"
             required
           >
-          <p class="field-help" id="target-help">Format attendu : propriétaire/nom-du-dépôt.</p>
+          <p class="field-help" id="target-help">
+            Collez l’URL HTTPS du dépôt. GitHub, GitLab.com et les instances GitLab auto-hébergées sont pris en charge.
+          </p>
 
-          <label for="token">Jeton d’accès personnel GitHub</label>
+          <label for="token" id="token-label">Jeton d’accès personnel GitHub ou GitLab</label>
           <input
             id="token"
             name="token"
@@ -58,8 +60,8 @@
             required
           >
           <p class="field-help">
-            Le jeton doit pouvoir lire les métadonnées et le contenu des dépôts. Pour une organisation,
-            il doit également permettre d’en lister les dépôts.
+            GitHub : accès en lecture au contenu; pour un groupe, accès en lecture aux dépôts.
+            GitLab : scopes read_api et read_repository; pour un groupe, accès aux projets du groupe.
           </p>
 
           <div class="actions">
@@ -84,8 +86,8 @@
           <p id="summary" class="summary"></p>
         </div>
         <p class="limitations">
-          Les branches actuellement accessibles sont parcourues. Seules les lignes ajoutées visibles dans les patchs transmis par GitHub sont inspectées.
-          GitHub peut omettre certains patchs, notamment pour les très gros commits; les limites et erreurs d’accès apparaissent ci-dessous.
+          Les branches actuellement accessibles sont parcourues. Seules les lignes ajoutées visibles dans les patchs transmis par la plateforme sont inspectées.
+          La plateforme peut omettre certains patchs, notamment pour les très gros commits; les limites et erreurs d’accès apparaissent ci-dessous.
           Ce rapport ne garantit pas l’absence de secrets.
         </p>
         <div id="scan-issues" class="issues" hidden></div>
