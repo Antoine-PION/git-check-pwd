@@ -78,6 +78,15 @@
     return secretKeySuffixes.some((suffix) => key.endsWith(suffix));
   }
 
+  function isSelfAssignment(match, value) {
+    if (!match[5]) {
+      return false;
+    }
+    const key = match[1].split(".").pop().toLowerCase().replace(/[_-]/g, "");
+    const assignedValue = value.trim().toLowerCase().replace(/[_-]/g, "");
+    return /^[A-Za-z_$][\w$-]*$/.test(value.trim()) && key === assignedValue;
+  }
+
   function getCapturedValue(match, rule) {
     if (rule.captureGroup === 1) {
       return match[1];
@@ -94,6 +103,11 @@
       /^(?:get|fetch|read|load|resolve|find|retrieve|lookup|obtain)[A-Z_$]/.test(value);
   }
 
+  function isLikelyQuotedCodeExpression(value) {
+    return /^\s*[+*/|&]\s*[A-Za-z_$][\w$.]*\s*\(/.test(value) ||
+      /\b[A-Za-z_$][\w$.]*\s*\([^)]*\)\s*[+|&]/.test(value);
+  }
+
   function detectLine(text) {
     const matches = [];
 
@@ -108,7 +122,10 @@
         const secret = getCapturedValue(match, rule);
         if (!secret || placeholderValues.test(secret) || variableReference.test(secret) ||
             (rule.name === "Mot de passe ou secret assigné" &&
-              Boolean(match[5]) && isLikelyCodeExpression(secret))) {
+              (isSelfAssignment(match, secret) ||
+                (Boolean(match[5])
+                  ? isLikelyCodeExpression(secret)
+                  : isLikelyQuotedCodeExpression(secret))))) {
           continue;
         }
 
