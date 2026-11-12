@@ -1,7 +1,16 @@
 (function () {
   "use strict";
 
-  const placeholderValues = /^(?:\*{4,}|x{4,}|<[^>]*>|your[_-].*|replace[_-].*|example.*|sample.*|dummy.*|change[_-]?me|changeme|test|none|null|undefined|true|false)$/i;
+  const placeholderValues = /^(?:\*{4,}|x{4,}|<[^>]*>|\$\{?[^}]+\}?|\{\{.*\}\}|your[_-].*|replace[_-].*|example.*|sample.*|dummy.*|placeholder.*|change[_-]?me|changeme|todo|fixme|test|password|secret|response|result|value|data|config|env|none|null|undefined|true|false)$/i;
+  const assignmentExpression = /["'`]?([A-Za-z_$][\w$-]*)["'`]?\s*[:=]\s*(?:"([^"\r\n]{8,})"|'([^'\r\n]{8,})'|`([^`\r\n]{8,})`|([^\s"'`,;]{8,}))/i;
+  const secretKeySuffixes = [
+    "password", "passwd", "pwd", "pass", "passphrase", "secret", "secretkey",
+    "apikey", "apisecret", "accesstoken", "authtoken", "authenticationtoken",
+    "clientsecret", "privatekey", "credential", "credentials", "token", "jwt",
+    "refreshtoken", "sessiontoken", "idtoken", "apitoken", "bearertoken",
+    "webhooksecret", "webhooktoken", "signingkey", "encryptionkey",
+    "awssecretaccesskey"
+  ];
   const rules = [
     {
       name: "Clé privée",
@@ -14,8 +23,18 @@
       severity: "Élevée"
     },
     {
+      name: "Jeton GitLab",
+      expression: /\bglpat-[A-Za-z0-9_-]{20,}\b/,
+      severity: "Élevée"
+    },
+    {
       name: "Clé d’accès AWS",
-      expression: /\bAKIA[0-9A-Z]{16}\b/,
+      expression: /\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b/,
+      severity: "Élevée"
+    },
+    {
+      name: "Clé API Anthropic",
+      expression: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{30,}\b/,
       severity: "Élevée"
     },
     {
@@ -34,11 +53,47 @@
       severity: "Élevée"
     },
     {
+      name: "Jeton Bearer",
+      expression: /\bBearer\s+([A-Za-z0-9._~+/-]{20,}={0,2})/i,
+      severity: "Élevée",
+      captureGroup: 1
+    },
+    {
+      name: "Mot de passe dans une chaîne de connexion",
+      expression: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:/@\s]+:([^@\s/]{8,})@/i,
+      severity: "Élevée",
+      captureGroup: 1
+    },
+    {
       name: "Mot de passe ou secret assigné",
-      expression: /\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*(?:"([^"\r\n]{8,})"|'([^'\r\n]{8,})'|([^\s"'`,;]{8,}))/i,
-      severity: "À vérifier"
+      expression: assignmentExpression,
+      severity: "À vérifier",
+      captureGroup: [2, 3, 4, 5]
     }
   ];
+
+  function isSecretAssignment(match) {
+    const key = match[1].toLowerCase().replace(/[_-]/g, "");
+    return secretKeySuffixes.some((suffix) => key.endsWith(suffix));
+  }
+
+  function getCapturedValue(match, rule) {
+    if (rule.captureGroup === 1) {
+      return match[1];
+    }
+    if (Array.isArray(rule.captureGroup)) {
+      return rule.captureGroup.map((group) => match[group]).find(Boolean);
+    }
+    return match[0];
+  }
+
+  function isLikelyCodeExpression(value) {
+    return /[(){};]|(?:^|[^=!<>])(?:=>|==|!=|\|\||&&|\+\+|--|\?)/.test(value) ||
+      /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(value) ||
+      /^(?:get|fetch|read|load|resolve|find|retrieve|lookup|obtain)[A-Z_$]/.test(value) ||
+      (/^[A-Za-z_$][\w$]*$/.test(value) && /[a-z]/.test(value) &&
+        /[A-Z]/.test(value));
+  }
 
   function detectLine(text) {
     const matches = [];
@@ -47,8 +102,14 @@
       const expression = new RegExp(rule.expression.source, rule.expression.flags + "g");
       let match;
       while ((match = expression.exec(text)) !== null) {
-        const secret = match[1] || match[2] || match[3] || match[0];
-        if (rule.name === "Mot de passe ou secret assigné" && placeholderValues.test(secret)) {
+        if (rule.name === "Mot de passe ou secret assigné" &&
+            !isSecretAssignment(match)) {
+          continue;
+        }
+        const secret = getCapturedValue(match, rule);
+        if (!secret || placeholderValues.test(secret) ||
+            (rule.name === "Mot de passe ou secret assigné" &&
+              Boolean(match[5]) && isLikelyCodeExpression(secret))) {
           continue;
         }
 
