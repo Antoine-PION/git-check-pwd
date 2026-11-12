@@ -7,7 +7,8 @@
   const secretKeySuffixes = [
     "password", "passwd", "pwd", "pass", "passphrase", "secret", "secretkey",
     "apikey", "apisecret", "accesstoken", "authtoken", "authenticationtoken",
-    "clientsecret", "privatekey", "credential", "credentials", "token", "jwt",
+    "authkey", "authentkey", "authenticationkey", "clientsecret", "privatekey",
+    "credential", "credentials", "token", "jwt",
     "refreshtoken", "sessiontoken", "idtoken", "apitoken", "bearertoken",
     "webhooksecret", "webhooktoken", "signingkey", "encryptionkey",
     "awssecretaccesskey"

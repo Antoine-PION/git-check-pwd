@@ -705,6 +705,18 @@
     return { data: await response.json(), headers: response.headers };
   }
 
+  function decodeSourceBytes(bytes) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      try {
+        return new TextDecoder("windows-1252").decode(bytes);
+      } catch {
+        throw new Error("La source n’est ni en UTF-8 ni en Windows-1252.");
+      }
+    }
+  }
+
   async function apiGetText(target, path, token, signal, maxBytes) {
     const response = await fetch(apiUrl(target, path), {
       headers: { "PRIVATE-TOKEN": token },
@@ -754,7 +766,7 @@
       }
     }
 
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const text = decodeSourceBytes(bytes);
     if (text.includes("\u0000")) {
       throw new Error("La source semble être un fichier binaire.");
     }
