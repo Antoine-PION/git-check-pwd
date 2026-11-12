@@ -64,17 +64,60 @@
             GitLab : scopes read_api et read_repository; pour un groupe, accès aux projets du groupe.
           </p>
 
+          <div class="vault-panel">
+            <label class="checkbox-label" for="remember-token">
+              <input id="remember-token" type="checkbox">
+              Enregistrer le jeton chiffré pour cette instance après l’analyse
+            </label>
+            <p class="field-help">
+              Le jeton est chiffré dans le stockage local du navigateur avec une phrase de passe qui n’est pas enregistrée.
+            </p>
+            <div id="vault-status" class="vault-status" role="status" aria-live="polite"></div>
+            <div id="vault-passphrase-fields" hidden>
+              <label for="vault-passphrase">Phrase de passe du coffre local</label>
+              <input
+                id="vault-passphrase"
+                type="password"
+                autocomplete="new-password"
+                minlength="12"
+              >
+              <p class="field-help">Au moins 12 caractères. Cette phrase ne peut pas être récupérée.</p>
+              <div id="vault-confirm-fields" hidden>
+                <label for="vault-passphrase-confirm">Confirmer la phrase de passe</label>
+                <input
+                  id="vault-passphrase-confirm"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="12"
+                >
+              </div>
+            </div>
+            <div id="vault-actions" class="actions" hidden>
+              <button type="button" id="unlock-token-button" class="secondary">Déverrouiller le jeton enregistré</button>
+              <button type="button" id="delete-token-button" class="secondary">Supprimer le jeton enregistré</button>
+            </div>
+          </div>
+
           <div class="actions">
             <button type="submit" id="scan-button">Analyser l’historique</button>
             <button type="button" id="cancel-button" class="secondary" disabled>Annuler</button>
           </div>
         </form>
 
+        <div id="storage-status" class="storage-status" role="status" aria-live="polite"></div>
         <div id="activity" class="activity" role="status" aria-live="polite" hidden>
           <p id="activity-message"></p>
           <progress id="progress" max="1" value="0" aria-label="Progression de l’analyse"></progress>
         </div>
         <div id="error-message" class="alert error" role="alert" hidden></div>
+      </section>
+
+      <section class="panel saved-reports" aria-labelledby="saved-reports-heading">
+        <h2 id="saved-reports-heading">Rapports enregistrés sur cet appareil</h2>
+        <p class="field-help">
+          Les rapports restent dans ce navigateur. Les valeurs des secrets et les jetons ne sont pas inclus.
+        </p>
+        <div id="saved-reports-list" class="saved-report-list"></div>
       </section>
 
       <section id="results" class="results" aria-labelledby="results-heading" hidden>
@@ -88,6 +131,7 @@
         <p class="limitations">
           Les branches actuellement accessibles sont parcourues. Seules les lignes ajoutées visibles dans les patchs transmis par la plateforme sont inspectées.
           La plateforme peut omettre certains patchs, notamment pour les très gros commits; les limites et erreurs d’accès apparaissent ci-dessous.
+          Une branche est considérée inactive après 180 jours sans commit. Les recommandations ne suppriment aucune branche, et supprimer une branche ne purge pas à elle seule l’historique Git.
           Ce rapport ne garantit pas l’absence de secrets.
         </p>
         <div id="scan-issues" class="issues" hidden></div>

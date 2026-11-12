@@ -57,7 +57,8 @@
           rule: rule.name,
           severity: rule.severity,
           start,
-          end: start + secret.length
+          end: start + secret.length,
+          secretValue: secret
         });
       }
     }
@@ -75,12 +76,12 @@
     let redactedLine = "";
     let cursor = 0;
     for (const span of spans) {
-      redactedLine += text.slice(cursor, span.start) + "[MASQUÉ]";
+      redactedLine += text.slice(cursor, span.start) + "*****";
       cursor = span.end;
     }
     redactedLine += text.slice(cursor);
 
-    return matches.map(({ rule, severity }) => ({ rule, severity, redactedLine }));
+    return matches.map(({ rule, severity, secretValue }) => ({ rule, severity, secretValue, redactedLine }));
   }
 
   function scanPatch(patch) {
