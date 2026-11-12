@@ -1,8 +1,9 @@
 (function () {
   "use strict";
 
-  const placeholderValues = /^(?:\*{4,}|x{4,}|<[^>]*>|\$\{?[^}]+\}?|\{\{.*\}\}|your[_-].*|replace[_-].*|example.*|sample.*|dummy.*|placeholder.*|change[_-]?me|changeme|todo|fixme|test|password|secret|response|result|value|data|config|env|none|null|undefined|true|false)$/i;
-  const assignmentExpression = /["'`]?([A-Za-z_$][\w$-]*)["'`]?\s*[:=]\s*(?:"([^"\r\n]{8,})"|'([^'\r\n]{8,})'|`([^`\r\n]{8,})`|([^\s"'`,;]{8,}))/i;
+  const placeholderValues = /^(?:\$?\*{4,}|x{4,}|<[^>]*>|\$\{[^}]+\}|\{\{.*\}\}|your[_-].*|replace[_-].*|example.*|sample.*|dummy.*|placeholder.*|change[_-]?me|changeme|todo|fixme|test|password|secret|response|result|value|data|config|env|none|null|undefined|true|false)$/i;
+  const variableReference = /^\$[A-Z_][A-Z0-9_]*$/;
+  const assignmentExpression = /["'`]?([A-Za-z_$][\w$-]*(?:\.[A-Za-z_$][\w$-]*)*)["'`]?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|([^\s"'`,;]+))/i;
   const secretKeySuffixes = [
     "password", "passwd", "pwd", "pass", "passphrase", "secret", "secretkey",
     "apikey", "apisecret", "accesstoken", "authtoken", "authenticationtoken",
@@ -73,7 +74,7 @@
   ];
 
   function isSecretAssignment(match) {
-    const key = match[1].toLowerCase().replace(/[_-]/g, "");
+    const key = match[1].toLowerCase().replace(/[._-]/g, "");
     return secretKeySuffixes.some((suffix) => key.endsWith(suffix));
   }
 
@@ -90,9 +91,7 @@
   function isLikelyCodeExpression(value) {
     return /[(){};]|(?:^|[^=!<>])(?:=>|==|!=|\|\||&&|\+\+|--|\?)/.test(value) ||
       /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(value) ||
-      /^(?:get|fetch|read|load|resolve|find|retrieve|lookup|obtain)[A-Z_$]/.test(value) ||
-      (/^[A-Za-z_$][\w$]*$/.test(value) && /[a-z]/.test(value) &&
-        /[A-Z]/.test(value));
+      /^(?:get|fetch|read|load|resolve|find|retrieve|lookup|obtain)[A-Z_$]/.test(value);
   }
 
   function detectLine(text) {
@@ -107,7 +106,7 @@
           continue;
         }
         const secret = getCapturedValue(match, rule);
-        if (!secret || placeholderValues.test(secret) ||
+        if (!secret || placeholderValues.test(secret) || variableReference.test(secret) ||
             (rule.name === "Mot de passe ou secret assigné" &&
               Boolean(match[5]) && isLikelyCodeExpression(secret))) {
           continue;
