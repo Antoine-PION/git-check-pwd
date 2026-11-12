@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src https://api.github.com; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <title>Git Check Pwd — Détection de secrets</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="scanner.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="page-header">
+        <p class="eyebrow">Git Check Pwd</p>
+        <h1>Repérez les secrets dans l’historique Git</h1>
+        <p class="intro">
+          Analysez les ajouts de commits d’un dépôt ou des dépôts accessibles d’une organisation GitHub.
+        </p>
+      </header>
+
+      <section class="panel" aria-labelledby="scan-heading">
+        <h2 id="scan-heading">Nouvelle analyse</h2>
+        <p class="security-note">
+          Votre jeton est utilisé uniquement dans ce navigateur et transmis directement à GitHub.
+          Il n’est envoyé ni au serveur qui héberge cette page ni à un autre service. Préférez un jeton
+          à durée limitée avec les droits de lecture minimaux.
+        </p>
+
+        <form id="scan-form">
+          <label for="target-mode">Périmètre</label>
+          <select id="target-mode" name="targetMode">
+            <option value="repository">Un dépôt</option>
+            <option value="organization">Une organisation</option>
+          </select>
+
+          <label for="target" id="target-label">Dépôt GitHub</label>
+          <input
+            id="target"
+            name="target"
+            type="text"
+            placeholder="proprietaire/depot"
+            autocomplete="off"
+            required
+          >
+          <p class="field-help" id="target-help">Format attendu : propriétaire/nom-du-dépôt.</p>
+
+          <label for="token">Jeton d’accès personnel GitHub</label>
+          <input
+            id="token"
+            name="token"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          >
+          <p class="field-help">
+            Le jeton doit pouvoir lire les métadonnées et le contenu des dépôts. Pour une organisation,
+            il doit également permettre d’en lister les dépôts.
+          </p>
+
+          <div class="actions">
+            <button type="submit" id="scan-button">Analyser l’historique</button>
+            <button type="button" id="cancel-button" class="secondary" disabled>Annuler</button>
+          </div>
+        </form>
+
+        <div id="activity" class="activity" role="status" aria-live="polite" hidden>
+          <p id="activity-message"></p>
+          <progress id="progress" max="1" value="0" aria-label="Progression de l’analyse"></progress>
+        </div>
+        <div id="error-message" class="alert error" role="alert" hidden></div>
+      </section>
+
+      <section id="results" class="results" aria-labelledby="results-heading" hidden>
+        <div class="results-heading">
+          <div>
+            <p class="eyebrow">Rapport</p>
+            <h2 id="results-heading">Résultats de l’analyse</h2>
+          </div>
+          <p id="summary" class="summary"></p>
+        </div>
+        <p class="limitations">
+          Les branches actuellement accessibles sont parcourues. Seules les lignes ajoutées visibles dans les patchs transmis par GitHub sont inspectées.
+          GitHub peut omettre certains patchs, notamment pour les très gros commits; les limites et erreurs d’accès apparaissent ci-dessous.
+          Ce rapport ne garantit pas l’absence de secrets.
+        </p>
+        <div id="scan-issues" class="issues" hidden></div>
+        <div id="findings" class="finding-list"></div>
+      </section>
+
+      <footer>
+        <p>Les valeurs détectées sont masquées dans le rapport. Vérifiez et révoquez tout secret exposé.</p>
+      </footer>
+    </main>
+  </body>
+</html>
