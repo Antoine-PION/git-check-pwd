@@ -20,6 +20,8 @@
   const activity = document.getElementById("activity");
   const activityMessage = document.getElementById("activity-message");
   const progress = document.getElementById("progress");
+  const projectProgressList = document.getElementById("project-progress-list");
+  const projectSummaryList = document.getElementById("project-summary-list");
   const errorMessage = document.getElementById("error-message");
   const results = document.getElementById("results");
   const summary = document.getElementById("summary");
@@ -274,7 +276,32 @@
     return randomId();
   }
 
-  function createSafeReport(repoResults, scanIssues, targetLabel) {
+  function getProjectSummaries(repositories, repoResults, scanIssues) {
+    return repositories.map((repository) => {
+      const name = typeof repository === "string" ? repository : repository.fullName;
+      const result = repoResults.find((item) => item.repository === name);
+      const issue = scanIssues.find((item) => item.startsWith(name + " : "));
+      const files = result
+        ? Array.from(new Set(result.findings.map((finding) => finding.path)))
+          .sort((left, right) => left.localeCompare(right))
+        : [];
+      const status = !result
+        ? "error"
+        : files.length > 0
+          ? "findings"
+          : result.issues.length > 0
+            ? "incomplete"
+            : "clean";
+      return {
+        repository: name,
+        status,
+        files,
+        issue: issue || ""
+      };
+    });
+  }
+
+  function createSafeReport(repoResults, scanIssues, targetLabel, repositories) {
     const now = new Date();
     const projects = repoResults.map((result) => {
       const secretIds = new Map();
@@ -326,6 +353,7 @@
       createdAt: now.toISOString(),
       targetLabel,
       projects,
+      projectSummaries: getProjectSummaries(repositories, repoResults, scanIssues),
       issues: Array.from(new Set(scanIssues))
     };
   }
@@ -426,7 +454,7 @@
         const openButton = appendText(actions, "button", "Ouvrir");
         openButton.type = "button";
         openButton.addEventListener("click", () => {
-          renderReport(report.projects, report.issues, report);
+          renderReport(report.projects, report.issues, report, report.projectSummaries);
           results.scrollIntoView({ behavior: "smooth", block: "start" });
         });
         const deleteButton = appendText(actions, "button", "Supprimer", "secondary");
@@ -1451,7 +1479,57 @@
     return project;
   }
 
-  function renderReport(repoResults, scanIssues, savedReport) {
+  function renderProjectSummary(summary) {
+    const item = document.createElement("article");
+    item.className = "project-summary-item status-" + summary.status;
+    const heading = document.createElement("div");
+    heading.className = "project-summary-heading";
+    const statusLabels = {
+      pending: ["…", "En attente"],
+      running: ["…", "En cours"],
+      clean: ["✓", "Aucun secret détecté"],
+      findings: ["!", "Secrets détectés"],
+      incomplete: ["?", "Analyse incomplète"],
+      error: ["?", "Analyse impossible"]
+    };
+    const status = statusLabels[summary.status] || statusLabels.incomplete;
+    const badge = appendText(heading, "span", status[0], "project-status-icon");
+    badge.setAttribute("aria-hidden", "true");
+    appendText(heading, "strong", summary.repository);
+    appendText(heading, "span", status[1], "project-status-label");
+    item.append(heading);
+
+    if (summary.progress) {
+      appendText(item, "p", summary.progress, "project-progress-detail");
+    }
+
+    const files = Array.isArray(summary.files) ? summary.files : [];
+    if (files.length > 0) {
+      appendText(item, "p", files.length + " fichier(s) impacté(s) :", "project-file-count");
+      const list = document.createElement("ul");
+      for (const path of files) {
+        appendText(list, "li", path);
+      }
+      item.append(list);
+    } else if (summary.issue) {
+      appendText(item, "p", summary.issue, "project-progress-detail");
+    }
+    return item;
+  }
+
+  function renderProjectProgress(repositories, projectStatuses) {
+    projectProgressList.replaceChildren();
+    for (const repository of repositories) {
+      const status = projectStatuses.get(repository.fullName) || {
+        repository: repository.fullName,
+        status: "pending",
+        files: []
+      };
+      projectProgressList.append(renderProjectSummary(status));
+    }
+  }
+
+  function renderReport(repoResults, scanIssues, savedReport, projectSummaries) {
     const allFindings = repoResults.flatMap((result) => result.findings);
     const uniqueFindings = new Set(allFindings.map((finding) =>
       finding.secretId ||
@@ -1460,13 +1538,22 @@
     const totalCommits = repoResults.reduce((total, result) => total + result.commitCount, 0);
     const totalFiles = repoResults.reduce((total, result) => total + result.filesScanned, 0);
     const allIssues = Array.from(new Set(scanIssues));
+    const summaries = projectSummaries || getProjectSummaries(
+      repoResults.map((result) => result.repository),
+      repoResults,
+      scanIssues
+    );
     results.hidden = false;
     document.getElementById("results-heading").textContent = savedReport
       ? "Rapport du " + formatReportDate(savedReport.createdAt)
       : "Résultats de l’analyse";
     summary.textContent = uniqueFindings.size + " détection(s) distincte(s) · " +
       totalCommits + " commit(s) · " + totalFiles + " fichier(s) inspecté(s) · " +
-      repoResults.length + " projet(s)";
+      summaries.length + " projet(s)";
+    projectSummaryList.replaceChildren();
+    for (const projectSummary of summaries) {
+      projectSummaryList.append(renderProjectSummary(projectSummary));
+    }
     findingsPanel.replaceChildren();
 
     if (allIssues.length > 0) {
@@ -1505,6 +1592,7 @@
     errorMessage.hidden = true;
     errorMessage.textContent = "";
     clearProjectSelection();
+    projectProgressList.replaceChildren();
     setBusy(true);
     setActivity("Récupération des projets accessibles…", 0, 1);
     activeController = new AbortController();
@@ -1574,12 +1662,21 @@
       }
 
       setActivity("Analyse des projets sélectionnés…", 0, repositories.length);
+      const projectStatuses = new Map();
+      projectProgressList.replaceChildren();
+      renderProjectProgress(repositories, projectStatuses);
 
       const repoResults = [];
       const scanIssues = [];
       let completedRepositories = 0;
 
       for (const repo of repositories) {
+        projectStatuses.set(repo.fullName, {
+          repository: repo.fullName,
+          status: "running",
+          files: []
+        });
+        renderProjectProgress(repositories, projectStatuses);
         try {
           const result = await scanRepository(
             repo,
@@ -1600,6 +1697,13 @@
                 completedRepositories,
                 repositories.length
               );
+              projectStatuses.set(repo.fullName, {
+                repository: repo.fullName,
+                status: "running",
+                files: [],
+                progress: suffix ? suffix.trim().replace(/^—\s*/, "") : "Préparation de l’analyse…"
+              });
+              renderProjectProgress(repositories, projectStatuses);
             }
           );
           repoResults.push(result);
@@ -1622,11 +1726,21 @@
                 " commit(s) ont atteint la limite de 300 fichiers renvoyés par l’API GitHub; certains contenus ont pu être omis."
             );
           }
+          const projectSummary = getProjectSummaries([repo], [result], [])[0];
+          projectStatuses.set(repo.fullName, projectSummary);
+          renderProjectProgress(repositories, projectStatuses);
         } catch (error) {
           if (error.name === "AbortError") {
             throw error;
           }
           scanIssues.push(repo.fullName + " : " + error.message);
+          projectStatuses.set(repo.fullName, {
+            repository: repo.fullName,
+            status: "error",
+            files: [],
+            issue: error.message
+          });
+          renderProjectProgress(repositories, projectStatuses);
         }
         completedRepositories += 1;
         setActivity(
@@ -1639,8 +1753,14 @@
       if (repoResults.length === 0) {
         throw new Error("Aucun dépôt n’a pu être analysé. " + scanIssues.join(" "));
       }
-      const report = createSafeReport(repoResults, scanIssues, targetInput.value.trim());
-      renderReport(repoResults, scanIssues);
+      const projectSummaries = getProjectSummaries(repositories, repoResults, scanIssues);
+      const report = createSafeReport(
+        repoResults,
+        scanIssues,
+        targetInput.value.trim(),
+        repositories
+      );
+      renderReport(repoResults, scanIssues, undefined, projectSummaries);
       let reportSaved = false;
       try {
         await putStored("reports", report);

@@ -122,6 +122,7 @@
         <div id="activity" class="activity" role="status" aria-live="polite" hidden>
           <p id="activity-message"></p>
           <progress id="progress" max="1" value="0" aria-label="Progression de l’analyse"></progress>
+          <div id="project-progress-list" class="project-summary-list" aria-label="Avancement par projet"></div>
         </div>
         <div id="error-message" class="alert error" role="alert" hidden></div>
       </section>
@@ -151,6 +152,10 @@
           Ce rapport ne garantit pas l’absence de secrets.
         </p>
         <div id="scan-issues" class="issues" hidden></div>
+        <section id="project-summary" class="project-summary" aria-labelledby="project-summary-heading">
+          <h3 id="project-summary-heading">Résumé par projet</h3>
+          <div id="project-summary-list" class="project-summary-list"></div>
+        </section>
         <div id="findings" class="finding-list"></div>
       </section>
 

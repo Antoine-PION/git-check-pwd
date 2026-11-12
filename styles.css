@@ -314,6 +314,116 @@ button:disabled {
   margin-bottom: 9px;
 }
 
+.project-summary {
+  margin: 18px 0;
+}
+
+.project-summary > h3 {
+  margin-bottom: 10px;
+  font-size: 1.05rem;
+}
+
+.project-summary-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.project-summary-item {
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.project-summary-item.status-pending,
+.project-summary-item.status-running {
+  border-left-color: #70808a;
+}
+
+.project-summary-item.status-clean {
+  border-left-color: #23834f;
+  background: #f0faf3;
+}
+
+.project-summary-item.status-findings {
+  border-left-color: #c3342c;
+  background: #fff4f2;
+}
+
+.project-summary-item.status-incomplete,
+.project-summary-item.status-error {
+  border-left-color: #b17a19;
+  background: #fff9ec;
+}
+
+.project-summary-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.project-summary-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.project-status-icon {
+  display: inline-grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8edf0;
+  color: #43525b;
+  font-weight: 800;
+}
+
+.status-clean .project-status-icon {
+  background: #23834f;
+  color: #fff;
+}
+
+.status-findings .project-status-icon {
+  background: #c3342c;
+  color: #fff;
+}
+
+.status-incomplete .project-status-icon,
+.status-error .project-status-icon {
+  background: #b17a19;
+  color: #fff;
+}
+
+.project-status-label {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.project-summary-item p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.project-summary-item ul {
+  margin: 5px 0 0;
+  padding-left: 29px;
+}
+
+.project-summary-item li {
+  padding: 2px 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
 progress {
   width: 100%;
   height: 10px;
@@ -572,6 +682,16 @@ footer {
   .project-selection-header {
     align-items: start;
     flex-direction: column;
+  }
+
+  .project-summary-heading {
+    align-items: start;
+    flex-wrap: wrap;
+  }
+
+  .project-status-label {
+    margin-left: 31px;
+    text-align: left;
   }
 
   .saved-report-actions {
