@@ -11,7 +11,12 @@
   const tokenLabel = document.getElementById("token-label");
   const tokenInput = document.getElementById("token");
   const scanButton = document.getElementById("scan-button");
+  const listProjectsButton = document.getElementById("list-projects-button");
   const cancelButton = document.getElementById("cancel-button");
+  const projectSelection = document.getElementById("project-selection");
+  const projectSelectionStatus = document.getElementById("project-selection-status");
+  const projectSelectionList = document.getElementById("project-selection-list");
+  const toggleProjectSelectionButton = document.getElementById("toggle-project-selection");
   const activity = document.getElementById("activity");
   const activityMessage = document.getElementById("activity-message");
   const progress = document.getElementById("progress");
@@ -34,9 +39,13 @@
   let activeController = null;
   let databasePromise;
   let targetRefreshId = 0;
+  let availableRepositories = [];
+  let repositorySelectionKey = "";
 
   function setBusy(busy) {
-    scanButton.disabled = busy;
+    scanButton.disabled = busy || !tokenInput.value.trim() ||
+      getSelectedRepositories().length === 0;
+    listProjectsButton.disabled = busy;
     cancelButton.disabled = !busy;
     modeInput.disabled = busy;
     targetInput.disabled = busy;
@@ -46,6 +55,78 @@
     vaultPassphraseConfirmInput.disabled = busy;
     unlockTokenButton.disabled = busy;
     deleteTokenButton.disabled = busy;
+    toggleProjectSelectionButton.disabled = busy || availableRepositories.length === 0;
+    for (const checkbox of projectSelectionList.querySelectorAll("input[type=checkbox]")) {
+      checkbox.disabled = busy;
+    }
+  }
+
+  function getSelectionKey(target) {
+    return JSON.stringify([target.platform, target.origin, target.mode, target.fullPath]);
+  }
+
+  function getSelectedRepositories() {
+    return Array.from(projectSelectionList.querySelectorAll("input[type=checkbox]:checked"))
+      .map((checkbox) => availableRepositories[Number(checkbox.value)])
+      .filter(Boolean);
+  }
+
+  function updateProjectSelectionState() {
+    const selectedCount = getSelectedRepositories().length;
+    scanButton.disabled = selectedCount === 0 || !tokenInput.value.trim() ||
+      Boolean(activeController);
+    toggleProjectSelectionButton.disabled =
+      availableRepositories.length === 0 || Boolean(activeController);
+    toggleProjectSelectionButton.textContent =
+      selectedCount === availableRepositories.length
+        ? "Tout désélectionner"
+        : "Tout sélectionner";
+    projectSelectionStatus.textContent = selectedCount + " projet(s) sélectionné(s) sur " +
+      availableRepositories.length + ".";
+  }
+
+  function clearProjectSelection() {
+    availableRepositories = [];
+    repositorySelectionKey = "";
+    projectSelectionList.replaceChildren();
+    projectSelection.hidden = true;
+    scanButton.disabled = true;
+    toggleProjectSelectionButton.disabled = true;
+    projectSelectionStatus.textContent = "";
+  }
+
+  function renderProjectSelection(repositories) {
+    availableRepositories = repositories.slice().sort((left, right) =>
+      left.fullName.localeCompare(right.fullName)
+    );
+    projectSelectionList.replaceChildren();
+    for (let index = 0; index < availableRepositories.length; index += 1) {
+      const repository = availableRepositories[index];
+      const label = document.createElement("label");
+      label.className = "project-selection-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(index);
+      checkbox.checked = true;
+      checkbox.addEventListener("change", updateProjectSelectionState);
+      const name = document.createElement("span");
+      name.textContent = repository.fullName;
+      label.append(checkbox, name);
+      projectSelectionList.append(label);
+    }
+    projectSelection.hidden = false;
+    updateProjectSelectionState();
+  }
+
+  function toggleProjectSelection() {
+    const checkboxes = Array.from(
+      projectSelectionList.querySelectorAll("input[type=checkbox]")
+    );
+    const shouldSelectAll = checkboxes.some((checkbox) => !checkbox.checked);
+    for (const checkbox of checkboxes) {
+      checkbox.checked = shouldSelectAll;
+    }
+    updateProjectSelectionState();
   }
 
   function setActivity(message, completed, total) {
@@ -383,6 +464,7 @@
       }
       tokenInput.value = await decryptToken(record, passphrase);
       vaultPassphraseInput.value = "";
+      clearProjectSelection();
       setVaultStatus("Jeton déverrouillé pour cette analyse. Il sera effacé du formulaire à la fin.", false);
     } catch (error) {
       setVaultStatus(error.message, true);
@@ -1418,25 +1500,69 @@
     }
   }
 
-  async function startScan(event) {
+  async function loadRepositories(event) {
     event.preventDefault();
+    errorMessage.hidden = true;
+    errorMessage.textContent = "";
+    clearProjectSelection();
+    setBusy(true);
+    setActivity("Récupération des projets accessibles…", 0, 1);
+    activeController = new AbortController();
+
+    try {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        throw new Error("Saisissez un jeton d’accès personnel.");
+      }
+
+      const target = parseTarget(modeInput.value, targetInput.value.trim());
+      const repositories = await getRepositories(target, token, activeController.signal);
+      if (repositories.length === 0) {
+        throw new Error("Aucun projet accessible trouvé pour ce périmètre.");
+      }
+
+      repositorySelectionKey = getSelectionKey(target);
+      renderProjectSelection(repositories);
+      activityMessage.textContent = "Liste des projets récupérée.";
+      progress.value = progress.max;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        activityMessage.textContent = "Récupération des projets annulée.";
+      } else {
+        errorMessage.textContent = error.message || "Impossible de récupérer la liste des projets.";
+        errorMessage.hidden = false;
+        activity.hidden = true;
+      }
+    } finally {
+      activeController = null;
+      setBusy(false);
+    }
+  }
+
+  async function startScan() {
     errorMessage.hidden = true;
     errorMessage.textContent = "";
     results.hidden = true;
     activity.hidden = false;
     progress.value = 0;
+    const repositories = getSelectedRepositories();
     setBusy(true);
     activeController = new AbortController();
 
     const token = tokenInput.value.trim();
-    const mode = modeInput.value;
 
     try {
       if (!token) {
         throw new Error("Saisissez un jeton d’accès personnel.");
       }
 
-      const target = parseTarget(mode, targetInput.value.trim());
+      const target = parseTarget(modeInput.value, targetInput.value.trim());
+      if (repositorySelectionKey !== getSelectionKey(target)) {
+        throw new Error("La liste des projets ne correspond plus à la cible. Affichez-la de nouveau.");
+      }
+      if (repositories.length === 0) {
+        throw new Error("Sélectionnez au moins un projet à analyser.");
+      }
       if (rememberTokenInput.checked) {
         const passphrase = vaultPassphraseInput.value;
         if (passphrase.length < 12) {
@@ -1447,11 +1573,7 @@
         }
       }
 
-      setActivity("Récupération des dépôts et de l’historique auprès de " + target.platform + "…", 0, 1);
-      const repositories = await getRepositories(target, token, activeController.signal);
-      if (repositories.length === 0) {
-        throw new Error("Aucun dépôt accessible trouvé pour ce périmètre.");
-      }
+      setActivity("Analyse des projets sélectionnés…", 0, repositories.length);
 
       const repoResults = [];
       const scanIssues = [];
@@ -1602,14 +1724,19 @@
   }
 
   modeInput.addEventListener("change", updateTargetHelp);
+  modeInput.addEventListener("change", clearProjectSelection);
   modeInput.addEventListener("change", refreshVaultControls);
   targetInput.addEventListener("input", updateTargetHelp);
+  targetInput.addEventListener("input", clearProjectSelection);
   targetInput.addEventListener("change", refreshVaultControls);
+  tokenInput.addEventListener("input", clearProjectSelection);
   rememberTokenInput.addEventListener("change", refreshVaultControls);
+  toggleProjectSelectionButton.addEventListener("click", toggleProjectSelection);
   unlockTokenButton.addEventListener("click", unlockSavedToken);
   deleteTokenButton.addEventListener("click", removeSavedToken);
 
-  form.addEventListener("submit", startScan);
+  form.addEventListener("submit", loadRepositories);
+  scanButton.addEventListener("click", startScan);
   cancelButton.addEventListener("click", () => {
     if (activeController) {
       activeController.abort();

@@ -98,8 +98,22 @@
             </div>
           </div>
 
+          <section id="project-selection" class="project-selection" aria-labelledby="project-selection-heading" hidden>
+            <div class="project-selection-header">
+              <div>
+                <h3 id="project-selection-heading">Projets à analyser</h3>
+                <p id="project-selection-status" class="field-help"></p>
+              </div>
+              <button type="button" id="toggle-project-selection" class="secondary" disabled>
+                Tout désélectionner
+              </button>
+            </div>
+            <div id="project-selection-list" class="project-selection-list"></div>
+          </section>
+
           <div class="actions">
-            <button type="submit" id="scan-button">Analyser l’historique</button>
+            <button type="submit" id="list-projects-button">Afficher les projets</button>
+            <button type="button" id="scan-button" disabled>Analyser les projets sélectionnés</button>
             <button type="button" id="cancel-button" class="secondary" disabled>Annuler</button>
           </div>
         </form>
