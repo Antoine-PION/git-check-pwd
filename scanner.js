@@ -177,5 +177,16 @@
     return findings;
   }
 
-  window.SecretScanner = Object.freeze({ detectLine, scanPatch });
+  function scanSource(source) {
+    const findings = [];
+    const lines = source.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      for (const detection of detectLine(lines[index])) {
+        findings.push({ ...detection, line: index + 1 });
+      }
+    }
+    return findings;
+  }
+
+  window.SecretScanner = Object.freeze({ detectLine, scanPatch, scanSource });
 })();

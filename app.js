@@ -2,6 +2,7 @@
   "use strict";
 
   const staleBranchAfterDays = 180;
+  const maxFallbackSourceBytes = 1024 * 1024;
   const form = document.getElementById("scan-form");
   const modeInput = document.getElementById("target-mode");
   const targetInput = document.getElementById("target");
@@ -221,6 +222,7 @@
         commitCount: result.commitCount,
         filesScanned: result.filesScanned,
         unavailablePatches: result.unavailablePatches,
+        sourceFallbackScanned: result.sourceFallbackScanned || 0,
         limitedCommits: result.limitedCommits,
         issues: result.issues.slice(),
         branches: result.branches.map((branch) => ({
@@ -243,7 +245,7 @@
       createdAt: now.toISOString(),
       targetLabel,
       projects,
-      issues: Array.from(new Set(scanIssues.concat(projects.flatMap((project) => project.issues))))
+      issues: Array.from(new Set(scanIssues))
     };
   }
 
@@ -532,6 +534,62 @@
     }
 
     return { data: await response.json(), headers: response.headers };
+  }
+
+  async function apiGetText(target, path, token, signal, maxBytes) {
+    const response = await fetch(apiUrl(target, path), {
+      headers: { "PRIVATE-TOKEN": token },
+      signal
+    });
+    if (!response.ok) {
+      const error = new Error(
+        "Téléchargement de la source impossible (HTTP " + response.status + ")."
+      );
+      error.status = response.status;
+      throw error;
+    }
+
+    const contentLength = Number(response.headers.get("Content-Length"));
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      throw new Error("La source dépasse la limite de " + maxBytes + " octets.");
+    }
+
+    let bytes;
+    if (response.body && response.body.getReader) {
+      const reader = response.body.getReader();
+      const chunks = [];
+      let totalBytes = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        totalBytes += value.length;
+        if (totalBytes > maxBytes) {
+          await reader.cancel();
+          throw new Error("La source dépasse la limite de " + maxBytes + " octets.");
+        }
+        chunks.push(value);
+      }
+      bytes = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+    } else {
+      const text = await response.text();
+      bytes = new TextEncoder().encode(text);
+      if (bytes.length > maxBytes) {
+        throw new Error("La source dépasse la limite de " + maxBytes + " octets.");
+      }
+    }
+
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    if (text.includes("\u0000")) {
+      throw new Error("La source semble être un fichier binaire.");
+    }
+    return text;
   }
 
   async function getAllPages(target, path, token, signal) {
@@ -945,8 +1003,10 @@
 
     const commits = Array.from(commitsBySha.values());
     const findings = [];
+    const issues = [];
     let filesScanned = 0;
     let unavailablePatches = 0;
+    let sourceFallbackScanned = 0;
 
     for (let index = 0; index < commits.length; index += 1) {
       if (signal.aborted) {
@@ -963,8 +1023,59 @@
       );
 
       for (const diff of diffs) {
-        if (!diff || typeof diff.diff !== "string" || diff.diff.length === 0) {
+        if (!diff) {
           unavailablePatches += 1;
+          continue;
+        }
+
+        const path = diff.new_path || diff.old_path;
+        const sourceRequired = typeof diff.diff !== "string" || diff.diff.length === 0;
+        if (sourceRequired) {
+          onProgress(repo.fullName, index + 1, commits.length, "source");
+          const sourcePath = diff.deleted_file ? diff.old_path : path;
+          const sourceRef = diff.deleted_file
+            ? commit.parent_ids && commit.parent_ids[0]
+            : commit.id;
+          if (!sourcePath || !sourceRef) {
+            unavailablePatches += 1;
+            issues.push(
+              repo.fullName + " / commit " + commit.id +
+                " : source indisponible pour " + (sourcePath || "un fichier sans nom") + "."
+            );
+            continue;
+          }
+
+          try {
+            const source = await apiGetText(
+              target,
+              prefix + "/files/" + encodeURIComponent(sourcePath) + "/raw" +
+                "?ref=" + encodeURIComponent(sourceRef),
+              token,
+              signal,
+              maxFallbackSourceBytes
+            );
+            filesScanned += 1;
+            sourceFallbackScanned += 1;
+            for (const finding of window.SecretScanner.scanSource(source)) {
+              findings.push({
+                ...finding,
+                repository: repo.fullName,
+                commit: diff.deleted_file ? sourceRef : commit.id,
+                path: sourcePath,
+                provider: target.platform,
+                origin: target.origin
+              });
+            }
+          } catch (error) {
+            if (error.name === "AbortError") {
+              throw error;
+            }
+            unavailablePatches += 1;
+            issues.push(
+              repo.fullName + " / commit " + commit.id + " / " + sourcePath +
+                " : patch absent et source non analysée (" + error.message + ")."
+            );
+          }
           continue;
         }
 
@@ -974,7 +1085,7 @@
             ...finding,
             repository: repo.fullName,
             commit: commit.id,
-            path: diff.new_path || diff.old_path || "Fichier inconnu",
+            path: path || "Fichier inconnu",
             provider: target.platform,
             origin: target.origin
           });
@@ -982,7 +1093,6 @@
       }
     }
 
-    const issues = [];
     await analyzeCurrentBranches(
       repo, branchAssessments, findings, token, signal, issues, onProgress
     );
@@ -992,6 +1102,7 @@
       commitCount: commits.length,
       filesScanned,
       unavailablePatches,
+      sourceFallbackScanned,
       limitedCommits: 0,
       findings,
       branches: branchAssessments,
@@ -1077,6 +1188,22 @@
     excerpt.append(code);
     article.append(excerpt);
 
+    if (typeof secret.secretValue === "string") {
+      const revealButton = appendText(article, "button", "Afficher la valeur détectée", "secondary");
+      revealButton.type = "button";
+      revealButton.setAttribute("aria-expanded", "false");
+      const value = appendText(article, "code", "", "revealed-secret");
+      value.hidden = true;
+      value.textContent = secret.secretValue;
+      revealButton.addEventListener("click", () => {
+        value.hidden = !value.hidden;
+        revealButton.setAttribute("aria-expanded", String(!value.hidden));
+        revealButton.textContent = value.hidden
+          ? "Afficher la valeur détectée"
+          : "Masquer la valeur détectée";
+      });
+    }
+
     appendText(article, "h6", "Présence actuelle dans les branches");
     const presentBranches = Array.from(secret.currentBranches)
       .map((name) => branchesByName.get(name))
@@ -1122,6 +1249,21 @@
 
     article.append(renderCommitList(secret));
     return article;
+  }
+
+  function renderProjectIssues(project, issues) {
+    if (issues.length === 0) {
+      return;
+    }
+    const section = document.createElement("section");
+    section.className = "project-issues";
+    appendText(section, "h4", "Limites et erreurs de ce projet");
+    const list = document.createElement("ul");
+    for (const issue of issues) {
+      appendText(list, "li", issue);
+    }
+    section.append(list);
+    project.append(section);
   }
 
   function renderBranchOverview(repoResult) {
@@ -1223,6 +1365,7 @@
       project.append(file);
     }
 
+    renderProjectIssues(project, repoResult.issues);
     return project;
   }
 
@@ -1234,15 +1377,13 @@
     ));
     const totalCommits = repoResults.reduce((total, result) => total + result.commitCount, 0);
     const totalFiles = repoResults.reduce((total, result) => total + result.filesScanned, 0);
-    const allIssues = Array.from(new Set(scanIssues.concat(
-      repoResults.flatMap((result) => result.issues)
-    )));
+    const allIssues = Array.from(new Set(scanIssues));
     results.hidden = false;
     document.getElementById("results-heading").textContent = savedReport
       ? "Rapport du " + formatReportDate(savedReport.createdAt)
       : "Résultats de l’analyse";
     summary.textContent = uniqueFindings.size + " détection(s) distincte(s) · " +
-      totalCommits + " commit(s) · " + totalFiles + " diff(s) de fichier inspecté(s) · " +
+      totalCommits + " commit(s) · " + totalFiles + " fichier(s) inspecté(s) · " +
       repoResults.length + " projet(s)";
     findingsPanel.replaceChildren();
 
@@ -1265,12 +1406,14 @@
       appendText(
         findingsPanel,
         "p",
-        "Aucun motif connu détecté dans les patchs analysés. Cela ne garantit pas l’absence de secrets.",
+        "Aucun motif connu détecté dans les patchs ou sources analysés. Cela ne garantit pas l’absence de secrets.",
         "empty-state"
       );
     }
 
-    for (const repoResult of repoResults) {
+    for (const repoResult of repoResults.slice().sort((left, right) =>
+      left.repository.localeCompare(right.repository)
+    )) {
       findingsPanel.append(renderProject(repoResult));
     }
   }
@@ -1325,6 +1468,8 @@
                 ? "branche"
                 : stage === "current"
                   ? "vérification de fichier/branche"
+                  : stage === "source"
+                    ? "source sans patch"
                   : "commit";
               const suffix = total > 0 ? " — " + label + " " + current + "/" + total : "";
               setActivity(
@@ -1336,14 +1481,21 @@
             }
           );
           repoResults.push(result);
+          if (result.sourceFallbackScanned > 0) {
+            result.issues.push(
+              result.sourceFallbackScanned + " fichier(s) sans patch exploitable : " +
+                "source téléchargée et analysée (limite de " +
+                Math.floor(maxFallbackSourceBytes / 1024) + " Kio par fichier)."
+            );
+          }
           if (result.unavailablePatches > 0) {
-            scanIssues.push(
+            result.issues.push(
               result.repository + " : " + result.unavailablePatches +
-              " fichier(s) sans patch exploitable fournis par " + repo.provider.platform + "."
+              " fichier(s) sans patch ou source exploitable; contenus non analysés."
             );
           }
           if (result.limitedCommits > 0) {
-            scanIssues.push(
+            result.issues.push(
               result.repository + " : " + result.limitedCommits +
                 " commit(s) ont atteint la limite de 300 fichiers renvoyés par l’API GitHub; certains contenus ont pu être omis."
             );
@@ -1366,7 +1518,7 @@
         throw new Error("Aucun dépôt n’a pu être analysé. " + scanIssues.join(" "));
       }
       const report = createSafeReport(repoResults, scanIssues, targetInput.value.trim());
-      renderReport(report.projects, report.issues);
+      renderReport(repoResults, scanIssues);
       let reportSaved = false;
       try {
         await putStored("reports", report);

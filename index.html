@@ -129,7 +129,9 @@
           <p id="summary" class="summary"></p>
         </div>
         <p class="limitations">
-          Les branches actuellement accessibles sont parcourues. Seules les lignes ajoutées visibles dans les patchs transmis par la plateforme sont inspectées.
+          Les branches actuellement accessibles sont parcourues. Les lignes ajoutées visibles dans les patchs sont inspectées;
+          si GitLab ne fournit pas de patch exploitable, la source à la révision du commit est téléchargée puis analysée
+          (limite de 1 Mio par fichier).
           La plateforme peut omettre certains patchs, notamment pour les très gros commits; les limites et erreurs d’accès apparaissent ci-dessous.
           Une branche est considérée inactive après 180 jours sans commit. Les recommandations ne suppriment aucune branche, et supprimer une branche ne purge pas à elle seule l’historique Git.
           Ce rapport ne garantit pas l’absence de secrets.
